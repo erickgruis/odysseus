@@ -32,6 +32,7 @@ from core.platform_compat import (
     which_tool,
 )
 from routes.shell_routes import TMUX_LOG_DIR
+from src.tmux_session import tmux_new_session_command
 from src.host_docker_access import (
     HOST_DOCKER_ACCESS_HINT,
     HOST_DOCKER_SOCKET_PATH,
@@ -313,12 +314,16 @@ def _remote_tmux_launch_command(session_id: str, runner: str) -> str:
     )
     sid = shlex.quote(str(session_id))
     runner_q = shlex.quote(str(runner))
-    runner_exec = shlex.quote(f"./{runner}")
+    # tmux reuses the server's cwd for new panes, and `-c` is ignored when the
+    # server's own cwd was deleted. `cd "$HOME"` in the pane makes the launch
+    # survive that case; "$HOME" is expanded on the remote host because the
+    # whole command is shell-quoted by the caller.
+    inner = shlex.quote(f'cd "$HOME" && exec ./{runner}')
     return (
         f'{_remote_posix_path_prefix()}{tmux}'
         f'chmod +x {runner_q} && '
         f'"$ODYSSEUS_TMUX" set-option -g history-limit 100000 2>/dev/null; '
-        f'"$ODYSSEUS_TMUX" new-session -d -s {sid} {runner_exec}'
+        f'"$ODYSSEUS_TMUX" new-session -d -s {sid} -c "$HOME" {inner}'
     )
 
 
@@ -1404,7 +1409,9 @@ def setup_cookbook_routes() -> APIRouter:
                 lines.append('exec "${SHELL:-/bin/bash}"')
                 wrapper_script.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 wrapper_script.chmod(0o755)
-            setup_cmd = None if IS_WINDOWS else f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(wrapper_script))}"
+            setup_cmd = None if IS_WINDOWS else tmux_new_session_command(
+                session_id, str(wrapper_script), history_limit=True
+            )
 
         logger.info(f"Model download: {req.repo_id} (backend={'ollama' if is_ollama_download else 'hf'}, include={req.include}, session={session_id}, remote={remote})")
         logger.info(f"Download setup_cmd: {setup_cmd}")
@@ -2821,7 +2828,9 @@ def setup_cookbook_routes() -> APIRouter:
                     f"ssh {_pf}{remote} {shlex.quote(_remote_tmux_launch_command(session_id, remote_runner))}"
                 )
             else:
-                setup_cmd = f"tmux set-option -g history-limit 100000 2>/dev/null; tmux new-session -d -s {session_id} {shlex.quote(str(runner_path))}"
+                setup_cmd = tmux_new_session_command(
+                    session_id, str(runner_path), history_limit=True
+                )
 
         if setup_cmd is None:
             # LOCAL Windows: launch the bash runner detached; no tmux setup_cmd.

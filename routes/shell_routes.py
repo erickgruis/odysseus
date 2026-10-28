@@ -55,6 +55,7 @@ from core.platform_compat import (
     git_bash_path,
     pid_alive,
 )
+from src.tmux_session import tmux_new_session_command
 
 
 def _require_admin(request: Request):
@@ -1006,7 +1007,7 @@ async def _generate_tmux(cmd: str, request: Request):
         "tmux wrapper script created: session=%s path=%s", session_id, script_path
     )
 
-    tmux_cmd = f"tmux new-session -d -s {session_id} {shlex.quote(str(script_path))}"
+    tmux_cmd = tmux_new_session_command(session_id, str(script_path))
 
     proc = await asyncio.create_subprocess_shell(
         tmux_cmd,
