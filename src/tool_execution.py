@@ -1694,7 +1694,8 @@ async def execute_tool_block(
 
     authority = active_request_authority() if request_authority is MISSING_AUTHORITY else request_authority
     parent = active_request_authority()
-    if isinstance(authority, RequestAuthority) and parent is not None and authority is not parent:
+    if (isinstance(authority, RequestAuthority) and parent is not None
+            and authority is not parent and not authority.narrows(parent)):
         authority = parent.intersect(authority)
     try:
         operation = ExactOperation.normalize(getattr(block, "tool_type", None), getattr(block, "content", None))
@@ -1820,11 +1821,10 @@ async def execute_tool_block(
 
     approval_claimed = False
     if exact_approval is not None:
-        if (
-            not isinstance(security_context, ToolRunSecurityContext)
-            or not security_context.external_untrusted_context_seen
-            or not exact_approval.pending.external_untrusted_context_seen
-        ):
+        # An exact approval admits the sealed action only while the reason it
+        # was raised is still in force (external-context taint or an asking
+        # access level).
+        if not _exact_approval_armed(security_context, exact_approval, block):
             return (
                 f"{getattr(block, 'tool_type', None)}: BLOCKED",
                 {
@@ -1937,12 +1937,56 @@ async def execute_tool_block(
     except ResourceIdentityError as error:
         if native_browser(operation, backend_operation.resource) and str(error) == PAGE_FAILURE:
             return f"{transport}: UNSUPPORTED", page_unavailable()
+        message = str(error)
+        if "server control state" in message:
+            message += (
+                ". Clear the workspace or choose a project folder outside the "
+                "Odysseus install, then try again."
+            )
         return f"{transport}: BLOCKED", {
-            "error": str(error), "exit_code": 1, "blocked": True,
+            "error": message, "exit_code": 1, "blocked": True,
             "failure_kind": "resource_identity_denied",
         }
     finally:
         _active_workspace.reset(token)
+
+
+def _exact_approval_armed(security_context, exact_approval, block) -> bool:
+    """Whether the gate that raised this approval is still in force.
+
+    Two gates raise the same card: external-context taint (the legacy gate) and
+    an interactive access level that asks before this effect. The exact
+    approval admits the sealed action only while one of them still applies.
+    """
+    if not isinstance(security_context, ToolRunSecurityContext):
+        return False
+    if (
+        security_context.external_untrusted_context_seen
+        and exact_approval.pending.external_untrusted_context_seen
+    ):
+        return True
+    from src.tool_access import (
+        ASK,
+        AUTO,
+        FULL_ACCESS,
+        normalize_access_level,
+        requires_approval,
+    )
+    from src.tool_capabilities import capabilities_for_action
+
+    level = normalize_access_level(security_context.access_level, default=None)
+    if level == FULL_ACCESS:
+        # The level asks nothing, so the sealed action runs either way.
+        return True
+    if level not in (ASK, AUTO):
+        return False
+    capabilities = capabilities_for_action(
+        getattr(block, "tool_type", None),
+        getattr(block, "content", None),
+    )
+    return requires_approval(
+        level, capabilities.effects, known=capabilities.known
+    )[0]
 
 
 async def _execute_tool_block_impl(

@@ -20,8 +20,10 @@ from typing import Any, TYPE_CHECKING
 from src.tool_approval_scopes import (
     CHAT_SESSION_APPROVAL_DECISION,
     DENY_APPROVAL_DECISION,
+    SINGLE_APPROVAL_DECISION,
     TASK_APPROVAL_DECISION,
     ToolApprovalScope,
+    grants_continuation,
     scope_for_decision,
 )
 from src.tool_capabilities import ToolCapabilities, capabilities_for_action
@@ -37,6 +39,16 @@ if TYPE_CHECKING:
 
 DEFAULT_APPROVAL_TTL_SECONDS = 10 * 60
 DEFAULT_MAX_PENDING_APPROVALS = 2048
+
+
+class ApprovalUnavailable(RuntimeError):
+    """The proposed action cannot be offered because it can never execute.
+
+    A card for an action the executor will always reject trains the user to
+    click "Allow" and get a failure.  When the sealed launch root contains
+    server control state, the approval is refused up front with an actionable
+    reason instead.
+    """
 
 
 def _normalized_owner(owner: Any) -> str:
@@ -208,6 +220,15 @@ class PendingToolApproval:
             ),
             "options": [
                 {
+                    "label": "Allow once",
+                    "value": SINGLE_APPROVAL_DECISION,
+                    "description": (
+                        "Execute only this sealed action, then ask again before "
+                        "the next one. Current tool, account, workspace, and "
+                        "sandbox restrictions still apply."
+                    ),
+                },
+                {
                     "label": "Allow for this task",
                     "value": TASK_APPROVAL_DECISION,
                     "description": (
@@ -251,11 +272,10 @@ class ExactToolApproval:
 
     pending: PendingToolApproval
     scope: ToolApprovalScope = ToolApprovalScope.TASK
-    # The seam consumed by agent_loop. Both chat-card allow choices cover the
-    # complete resumed task, because one-action scope there immediately
-    # re-entered the same gate on the next round. Callers with no resumable
-    # chat still get SINGLE_ACTION, which leaves the gate armed behind the
-    # sealed action.
+    # The seam consumed by agent_loop. "Allow for this task" and "Allow for
+    # this chat session" cover the complete resumed run; "Allow once" keeps the
+    # gate armed behind the sealed action. Callers with no resumable chat get
+    # SINGLE_ACTION as well, so their one-use grant cannot widen.
     allow_remaining_actions: bool = True
     _claimed: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -456,6 +476,15 @@ class ToolApprovalStore:
                     document_digest = owned_operation.document_digest
         except (ValueError, TypeError, OSError, RuntimeError, AttributeError):
             pass  # Unresolved proposals are never reconstructed at execution.
+        if process_operation is not None and process_operation.launch is not None:
+            from src.agent_runtime.process_resources import launch_workspace_conflict
+
+            conflict = launch_workspace_conflict(process_operation.launch.scope.root)
+            if conflict:
+                raise ApprovalUnavailable(
+                    f"{conflict} Clear the workspace or choose a project folder "
+                    "outside the Odysseus install, then try again."
+                )
         if tool_name in NATIVE_FILESYSTEM_TOOLS and backend_operation is not None and isinstance(backend_operation.resource, NativeBackendResource):
             try:
                 roots = request_authority.resource_roots if request_authority is not None else ()
@@ -565,10 +594,9 @@ class ToolApprovalStore:
 
         ``allow_continuation`` is the caller's assertion that it owns a
         resumable conversation the granted scope can apply to. Callers without
-        one (the skill tester, unattended audits) pass ``False`` and get the
-        original one-use grant, so a button labelled "Allow once" cannot widen
-        into a run-long bypass just because the chat card reuses the same wire
-        value.
+        one (the skill tester, unattended audits) pass ``False`` and get a
+        one-use grant, so a task/chat decision cannot widen into a run-long
+        bypass on a surface that has no conversation to grant it for.
         """
         now = time.time()
         with self._lock:
@@ -599,7 +627,9 @@ class ToolApprovalStore:
         return ExactToolApproval(
             pending,
             scope=scope,
-            allow_remaining_actions=True,
+            # "Allow once" keeps the gate armed for anything after the sealed
+            # action; task/chat scope lifts it for the resumed run.
+            allow_remaining_actions=grants_continuation(scope),
         )
 
     def peek(self, approval_id: Any) -> PendingToolApproval | None:

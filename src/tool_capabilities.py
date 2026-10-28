@@ -16,6 +16,12 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
+from src.tool_access import (
+    READ_EFFECTS,
+    READ_ONLY,
+    normalize_access_level,
+    requires_approval,
+)
 from src.tool_approval_scopes import CHAT_SESSION_APPROVAL_CONTEXT_MARKER
 from src.tool_security import BUILTIN_EMAIL_TOOLS, is_public_blocked_tool
 
@@ -714,6 +720,11 @@ TOOL_APPROVAL_GATE_ENABLED = (
 class ToolGateDecision:
     allowed: bool
     reason: str | None = None
+    # Whether a blocked call may be retried through the exact-approval card.
+    # Deployment limits (read-only access, token-only callers) set this False:
+    # the loop must report a hard denial instead of offering an approval the
+    # user could click but that could never execute.
+    approvable: bool = True
 
 
 _EXTERNAL_MESSAGE_SOURCES = frozenset(
@@ -804,6 +815,10 @@ class ToolRunSecurityContext:
     # Driven by a bearer API token, not a person at a browser. Privileged
     # tools are refused outright and no approval can lift that.
     delegated_credential: bool = False
+    # Server-resolved interactive access level (see src.tool_access).  None
+    # keeps the legacy post-external-context gate for callers that do not have
+    # a session level (scheduler, skills, direct tests).
+    access_level: Optional[str] = None
 
     def observe_messages(self, messages: Iterable[dict]) -> None:
         """Apply server-owned chat scope and promote untrusted prompt context."""
@@ -838,6 +853,55 @@ class ToolRunSecurityContext:
             self.external_untrusted_context_seen = True
 
     def decision_for(self, tool_name: Any, content: Any = None) -> ToolGateDecision:
+        """Apply the session access level, then the legacy taint gate.
+
+        Denials that come from deployment policy (delegated credentials,
+        read-only) are checked before any human-granted bypass so an approval
+        can never widen them.
+        """
+
+        if self.delegated_credential and delegated_tool_is_blocked(tool_name, content):
+            return ToolGateDecision(
+                False,
+                (
+                    f"Tool '{tool_name}' is not available to API-token callers. "
+                    "It requires an interactive session."
+                ),
+                approvable=False,
+            )
+
+        level = (
+            normalize_access_level(self.access_level, default=None)
+            if self.access_level is not None
+            else None
+        )
+        if level == READ_ONLY:
+            capabilities = capabilities_for_action(tool_name, content)
+            blocked = capabilities.effects - READ_EFFECTS
+            if not capabilities.known or blocked:
+                named = ", ".join(sorted(effect.value for effect in blocked))
+                return ToolGateDecision(
+                    False,
+                    f"Read Only access blocks {named or 'unclassified actions'}.",
+                    approvable=False,
+                )
+            return ToolGateDecision(True)
+
+        if self.approval_gate_bypassed:
+            return ToolGateDecision(True)
+        if isinstance(tool_name, str) and tool_name in self.unattended_tools:
+            return ToolGateDecision(True)
+
+        if level is not None:
+            capabilities = capabilities_for_action(tool_name, content)
+            needs_approval, reason = requires_approval(
+                level, capabilities.effects, known=capabilities.known
+            )
+            return ToolGateDecision(not needs_approval, reason or None)
+
+        return self._legacy_decision_for(tool_name, content)
+
+    def _legacy_decision_for(self, tool_name: Any, content: Any = None) -> ToolGateDecision:
         # Checked before the bypasses below, because neither may lift it, and
         # kept independent of external_untrusted_context_seen so it holds on a
         # run where that gate never arms and raises no prompt to bypass.

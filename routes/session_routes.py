@@ -384,6 +384,34 @@ def setup_session_routes(
     OPENAI_API_KEY = config.get("OPENAI_API_KEY")
     SESSIONS_FILE = config.get("SESSIONS_FILE")
     
+    @router.get("/tool-access")
+    def get_tool_access(request: Request):
+        """Preset metadata plus the default level for new chats.
+
+        The menu copy lives on the server so the UI and the enforcement table
+        cannot drift apart. ``admin`` says whether this caller may select Full
+        Access; non-admins are clamped server-side regardless.
+        """
+        from src.settings import get_setting
+        from src.tool_access import (
+            DEFAULT_LEVEL,
+            ORDER,
+            PRESETS,
+            normalize_access_level,
+        )
+        from src.tool_security import owner_is_admin_or_single_user
+
+        return {
+            "presets": [dict(preset) for preset in PRESETS],
+            "levels": list(ORDER),
+            "default": (
+                normalize_access_level(get_setting("tool_access_default"))
+                or DEFAULT_LEVEL
+            ),
+            "admin": owner_is_admin_or_single_user(effective_user(request)),
+            "delegated": is_delegated_credential(request),
+        }
+
     @router.get("/sessions")
     def list_sessions(request: Request):
         user = effective_user(request)
@@ -509,6 +537,7 @@ def setup_session_routes(
                     "has_documents": s.id in doc_session_ids,
                     "has_images": s.id in img_session_ids,
                     "mode": s.mode,
+                    "access_level": getattr(s, "access_level", None) or None,
                     "thinking_mode": s.thinking_mode or "off",
                     "message_count": s.message_count or 0,
                 })
@@ -621,6 +650,23 @@ def setup_session_routes(
         
         sid = str(uuid.uuid4())
         user = effective_user(request)
+        # New chats start at the admin's configured default, clamped for this
+        # caller. The composer can override it on the first message.
+        from src.settings import get_setting
+        from src.tool_access import (
+            DEFAULT_LEVEL,
+            clamp_access_level,
+            normalize_access_level,
+        )
+        from src.tool_security import owner_is_admin_or_single_user
+
+        _default_access_level = clamp_access_level(
+            normalize_access_level(get_setting("tool_access_default"))
+            or DEFAULT_LEVEL,
+            admin=owner_is_admin_or_single_user(user),
+            delegated=is_delegated_credential(request),
+            default=DEFAULT_LEVEL,
+        )
         session = session_manager.create_session(
             session_id=sid,
             name=name or "",
@@ -630,6 +676,7 @@ def setup_session_routes(
             owner=user,
             cwd=cwd or None,
             endpoint_id=endpoint_id.strip() if endpoint_id else None,
+            access_level=_default_access_level,
         )
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
@@ -1214,6 +1261,91 @@ def setup_session_routes(
 
         except KeyError:
             raise HTTPException(404, f"Session {session_id} not found")
+
+    @router.get("/session/{session_id}/access-level")
+    def get_session_access_level(request: Request, session_id: str):
+        """Current interactive tool access level for one chat."""
+        _verify_session_owner(request, session_id)
+        from src.settings import get_setting
+        from src.tool_access import (
+            DEFAULT_LEVEL,
+            clamp_access_level,
+            normalize_access_level,
+        )
+        from src.tool_security import owner_is_admin_or_single_user
+
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row is None:
+                raise HTTPException(404, f"Session {session_id} not found")
+            stored = normalize_access_level(row.access_level, default=None)
+        finally:
+            db.close()
+        level = clamp_access_level(
+            stored
+            or normalize_access_level(get_setting("tool_access_default"))
+            or DEFAULT_LEVEL,
+            admin=owner_is_admin_or_single_user(effective_user(request)),
+            delegated=is_delegated_credential(request),
+            default=DEFAULT_LEVEL,
+        )
+        return {"access_level": level, "stored": stored}
+
+    @router.post("/session/{session_id}/access-level")
+    async def set_session_access_level(
+        request: Request, session_id: str, level: str = Form(...)
+    ):
+        """Set the interactive tool access level for one chat.
+
+        The menu is a display value on the client; this endpoint is the writable
+        source of truth. The value is normalized and clamped before storage, so
+        a page cannot hand itself Full Access or bypass a token's restrictions.
+        """
+        _verify_session_owner(request, session_id)
+        from src.tool_access import ORDER, clamp_access_level, normalize_access_level
+        from src.tool_security import owner_is_admin_or_single_user
+
+        requested = normalize_access_level(level, default=None)
+        if requested is None:
+            raise HTTPException(
+                400,
+                f"Unknown access level {level!r}. Expected one of: {', '.join(ORDER)}.",
+            )
+        resolved = clamp_access_level(
+            requested,
+            admin=owner_is_admin_or_single_user(effective_user(request)),
+            delegated=is_delegated_credential(request),
+        )
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row is None:
+                raise HTTPException(404, f"Session {session_id} not found")
+            row.access_level = resolved
+            row.updated_at = utcnow_naive()
+            db.commit()
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating access level for session {session_id}: {e}")
+            raise HTTPException(500, "Failed to update session access level")
+        finally:
+            db.close()
+
+        # Keep the hydrated in-memory copy in step so the next turn does not
+        # read a stale level before the session is reloaded from the DB.
+        live = session_manager.sessions.get(session_id)
+        if live is not None:
+            live.access_level = resolved
+        return {
+            "status": "success",
+            "access_level": resolved,
+            "requested": requested,
+            "clamped": resolved != requested,
+        }
 
     @router.post("/session/{session_id}/compact")
     async def compact_session(request: Request, session_id: str):

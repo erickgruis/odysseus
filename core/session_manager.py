@@ -158,6 +158,7 @@ class SessionManager:
             max_tokens_override=getattr(db_session, "max_tokens_override", None),
             cwd=getattr(db_session, "cwd", None) or None,
             endpoint_id=getattr(db_session, "endpoint_id", None) or None,
+            access_level=getattr(db_session, "access_level", None) or "ask",
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
         return session
@@ -224,6 +225,7 @@ class SessionManager:
             max_tokens_override=getattr(db_session, "max_tokens_override", None),
             cwd=getattr(db_session, "cwd", None) or None,
             endpoint_id=getattr(db_session, "endpoint_id", None) or None,
+            access_level=getattr(db_session, "access_level", None) or "ask",
         )
 
         # The rows just loaded are the whole transcript, so they — not the
@@ -567,6 +569,7 @@ class SessionManager:
         cwd: str = None,
         headers: Optional[Dict[str, str]] = None,
         endpoint_id: Optional[str] = None,
+        access_level: str = "ask",
     ) -> Session:
         """Create a new session and save to database."""
         from src.chatgpt_subscription import is_chatgpt_subscription_base
@@ -584,6 +587,7 @@ class SessionManager:
                 owner=owner,
                 cwd=cwd or None,
                 endpoint_id=endpoint_id,
+                access_level=access_level or "ask",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -600,6 +604,7 @@ class SessionManager:
                 owner=owner,
                 cwd=cwd or None,
                 endpoint_id=endpoint_id,
+                access_level=access_level or "ask",
             )
 
             self.sessions[session_id] = session

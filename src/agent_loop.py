@@ -77,6 +77,7 @@ from src.tool_capabilities import (
     tool_result_should_arm_gate,
 )
 from src.tool_approvals import (
+    ApprovalUnavailable,
     ExactToolApproval,
     document_content_digest,
     tool_approval_store,
@@ -21048,6 +21049,7 @@ async def stream_agent_loop(
     fallback_statuses: Optional[Set[int]] = None,
     fallback_on_empty: bool = True,
     plan_mode: bool = False,
+    access_level: Optional[str] = None,
     approved_plan: Optional[str] = None,
     tool_policy: Optional[ToolPolicy] = None,
     workspace: Optional[str] = None,
@@ -21094,6 +21096,17 @@ async def stream_agent_loop(
     if plan_mode:
         disabled_tools.update(plan_mode_disabled_tools())
 
+    # Read Only is a persistent access level, not a per-turn plan modifier, but
+    # it enforces the same allowlist.  Apply it here too so every caller (not
+    # just the HTTP route) gets the same restriction, and drop MCP so a tainted
+    # server inventory cannot reintroduce a mutating tool.
+    from src.tool_access import is_read_only, normalize_access_level
+    _access_level = normalize_access_level(access_level, default=None)
+    if is_read_only(_access_level):
+        disabled_tools.update(plan_mode_disabled_tools())
+        if tool_policy is not None:
+            tool_policy = replace(tool_policy, disable_mcp=True)
+
     from src.tool_capabilities import delegated_tool_is_blocked
     _caller_hard_denials = frozenset(disabled_tools | (
         set(tool_policy.all_disabled_names()) if tool_policy else set()
@@ -21110,6 +21123,7 @@ async def stream_agent_loop(
             history_session=history_session,
             external_untrusted_context_seen=external_untrusted_context_seen,
             delegated_credential=delegated_credential,
+            access_level=_access_level,
             workspace=workspace,
             client_runtime_context=client_runtime_context,
             external_tool_schemas=external_tool_schemas,
@@ -21209,6 +21223,7 @@ async def stream_agent_loop(
             exact_approval and exact_approval.allow_remaining_actions
         ),
         delegated_credential=bool(delegated_credential),
+        access_level=_access_level,
     )
     _has_tui_host_bridge = _tui_host_bridge_is_usable(client_runtime_context)
     if (
@@ -33360,7 +33375,17 @@ async def stream_agent_loop(
                     in {"edit_document", "suggest_document", "update_document"}
                     else None
                 )
-                if (
+                if getattr(security_decision, "approvable", True) is False:
+                    # Deployment limits (Read Only access, token-only callers)
+                    # cannot be lifted by a card, so do not offer one.
+                    desc = f"{block.tool_type}: BLOCKED"
+                    result = {
+                        "error": security_decision.reason or "Tool blocked by policy.",
+                        "exit_code": 1,
+                        "blocked": True,
+                        "policy": "access_level",
+                    }
+                elif (
                     block.tool_type
                     in {"edit_document", "suggest_document", "update_document"}
                     and (
@@ -33390,47 +33415,61 @@ async def stream_agent_loop(
                     )
                     approval_selected_tools.add(block.tool_type)
                     approval_selected_tools.difference_update(disabled_tools)
-                    pending_approval = tool_approval_store.create(
-                        owner=owner,
-                        session_id=session_id,
-                        origin_run_id=run_security.run_id,
-                        tool_name=block.tool_type,
-                        content=block.content,
-                        workspace=workspace,
-                        document_id=getattr(approval_document, "id", None),
-                        document_version=getattr(approval_document, "version_count", None),
-                        document_digest=(
-                            document_content_digest(
-                                getattr(approval_document, "current_content", "")
-                            )
-                            if approval_document is not None
-                            else None
-                        ),
-                        external_untrusted_context_seen=(
-                            run_security.external_untrusted_context_seen
-                        ),
-                        selected_tools=approval_selected_tools,
-                        continuation_query=_retrieval_query or _last_user,
-                        capabilities=capabilities_for_action(
-                            block.tool_type, block.content
-                        ),
-                        request_text=_last_user,
-                        request_authority=active_request_authority(),
-                        client_runtime_context=client_runtime_context,
-                    )
-                    desc = f"{block.tool_type}: APPROVAL REQUIRED"
-                    result = {
-                        "output": "Waiting for an exact user approval.",
-                        "exit_code": None,
-                        "approval_required": True,
-                        "ask_user": pending_approval.public_payload(
-                            reason=security_decision.reason,
-                        ),
-                    }
-                    logger.info(
-                        "Exact approval required before tool start: %s",
-                        block.tool_type,
-                    )
+                    try:
+                        pending_approval = tool_approval_store.create(
+                            owner=owner,
+                            session_id=session_id,
+                            origin_run_id=run_security.run_id,
+                            tool_name=block.tool_type,
+                            content=block.content,
+                            workspace=workspace,
+                            document_id=getattr(approval_document, "id", None),
+                            document_version=getattr(approval_document, "version_count", None),
+                            document_digest=(
+                                document_content_digest(
+                                    getattr(approval_document, "current_content", "")
+                                )
+                                if approval_document is not None
+                                else None
+                            ),
+                            external_untrusted_context_seen=(
+                                run_security.external_untrusted_context_seen
+                            ),
+                            selected_tools=approval_selected_tools,
+                            continuation_query=_retrieval_query or _last_user,
+                            capabilities=capabilities_for_action(
+                                block.tool_type, block.content
+                            ),
+                            request_text=_last_user,
+                            request_authority=active_request_authority(),
+                            client_runtime_context=client_runtime_context,
+                        )
+                    except ApprovalUnavailable as exc:
+                        # Sealing the launch boundary proved this action can
+                        # never execute. Do not offer a card the user cannot
+                        # make succeed; tell the model what to change.
+                        pending_approval = None
+                        desc = f"{block.tool_type}: BLOCKED"
+                        result = {
+                            "error": str(exc),
+                            "exit_code": 1,
+                            "blocked": True,
+                            "failure_kind": "unsafe_launch_workspace",
+                        }
+                    if pending_approval is not None:
+                        desc = f"{block.tool_type}: APPROVAL REQUIRED"
+                        result = {
+                            "output": "Waiting for an exact user approval.",
+                            "exit_code": None,
+                            "approval_required": True,
+                            "ask_user": pending_approval.public_payload(
+                                reason=security_decision.reason,
+                            ),
+                        }
+                        logger.info(
+                            "Exact approval required before tool start: %s",
+                            block.tool_type,
+                        )
             else:
                 _execution_attempted = True
                 if block.tool_type in {"bash", "host_shell", "python"}:

@@ -586,3 +586,51 @@ async def test_authority_denial_cannot_create_completion_receipt(monkeypatch):
     assert journal.actions[0].execution_id is None
     assert journal.actions[0].outcome["authoritative"] is False
     assert journal.actions[0].outcome["blocked"] is True
+
+
+def test_rebinding_the_same_authority_does_not_mark_it_inherited():
+    # The agent loop keeps one authority bound for the whole run. A tool
+    # execution rebinds that same object, which must stay top-level: an
+    # inherited authority may not consume an exact approval, so the rebind used
+    # to make every approved process fail producer admission.
+    current = authority("bash")
+    with bind_request_authority(current):
+        with bind_request_authority(current):
+            assert active_request_authority() is current
+            assert active_request_authority().inherited is False
+
+
+def test_rebinding_the_same_request_narrowed_by_policy_is_not_inherited():
+    # execute_tool_block re-applies the turn's tool policy, which creates a
+    # different object for the same request. That narrowing must not be treated
+    # as a child scope, or every approved process fails producer admission.
+    current = authority("bash")
+    narrowed = current.restrict(ToolPolicy(), {"python"})
+    assert narrowed is not current
+    assert narrowed.request_id == current.request_id
+    with bind_request_authority(current):
+        with bind_request_authority(narrowed):
+            effective = active_request_authority()
+            assert effective.inherited is False
+            assert effective.permits(ExactOperation.normalize("bash", "pwd"))
+            assert not effective.permits(ExactOperation.normalize("python", "print(1)"))
+
+
+def test_rebinding_a_distinct_child_still_intersects_and_is_inherited():
+    parent = authority("bash")
+    child = authority("bash", "python")
+    with bind_request_authority(parent):
+        with bind_request_authority(child):
+            effective = active_request_authority()
+            assert effective.inherited is True
+            assert effective.permits(ExactOperation.normalize("bash", "pwd"))
+            assert not effective.permits(ExactOperation.normalize("python", "print(1)"))
+
+
+def test_noop_restriction_keeps_the_authority_object_identity():
+    current = authority("bash")
+    assert current.restrict(ToolPolicy(), set()) is current
+    restricted = current.restrict(ToolPolicy(), {"python"})
+    assert restricted is not current
+    assert "python" in restricted.denied
+    assert "bash" not in restricted.denied

@@ -38,6 +38,7 @@ import {
 import { createTerminalStreamError, isRecoverableStreamError } from './chatStreamErrors.js';
 import { loadPanel } from './panels.js?v=20260909movepicklayer1';
 import { invalidateSettings } from './appConfig.js';
+import { currentAccessLevel } from './toolAccess.js?v=20261027toolaccess1';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -233,7 +234,7 @@ import { invalidateSettings } from './appConfig.js';
   document.addEventListener('odysseus:tool-approval', (event) => {
     const detail = event && event.detail ? event.detail : {};
     const decision = String(detail.decision || '').toLowerCase();
-    if (!detail.approval_id || !['approve', 'approve_task', 'deny'].includes(decision)) return;
+    if (!detail.approval_id || !['approve', 'approve_task', 'approve_once', 'deny'].includes(decision)) return;
     _pendingToolApproval = {
       approval_id: String(detail.approval_id),
       decision,
@@ -2641,6 +2642,9 @@ import { invalidateSettings } from './appConfig.js';
 	      }
 	      fd.append('mode', isAgentMode ? 'agent' : 'chat');
 	      fd.append('plan_mode', isPlanMode ? 'true' : 'false');
+	      // The server stores this on the session and enforces it per tool
+	      // call; the pill is only a selector.
+	      fd.append('access_level', currentAccessLevel());
 	      if (!isPlanMode && _pendingApprovedPlan) {
 	        fd.append('approved_plan', _pendingApprovedPlan.slice(0, 8192));
 	        _pendingApprovedPlan = '';

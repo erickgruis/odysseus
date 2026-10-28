@@ -129,6 +129,8 @@ class Session:
     # URL-matched). Lets two endpoints that share a provider URL but not
     # credentials stay distinguishable.
     endpoint_id: Optional[str] = None
+    # Interactive tool access level; see src.tool_access.
+    access_level: str = "ask"
 
     def __post_init__(self):
         if self.headers is None:

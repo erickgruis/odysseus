@@ -71,6 +71,17 @@ Two exemptions apply even when the gate is on, both deliberate:
 - Sources in `_CONTROL_PLANE_CONTEXT_SOURCES` (skills, runtime descriptors, the open editor document, the open email, uploaded files) are treated as control-plane metadata and still permit read-only tools.
 - A TUI run that advertises a host shell bridge and declares `unattended_mode` exempts the local execution set in `TUI_CLIENT_TOOL_NAMES`. Personal, network and deployment-local tools are never exempted.
 
+### Interactive access levels — per chat
+
+`src/tool_access.py` adds a per-session level that decides whether a call that the request policy already admits runs directly or raises the exact-action approval card:
+
+- **Read Only** — plan-mode allowlist, MCP dropped, `bash`/`python` blocked. No card is offered because nothing mutating is reachable; a textual call to a mutating tool is a hard denial.
+- **Ask** (new-chat default) — every non-read effect asks. The card offers Allow once, Allow for this task, Allow for this chat session, or Deny.
+- **Auto** — workspace writes, code execution, UI changes run without asking; `network_egress`, `external_side_effect`, `admin_change`, `destructive`, and unknown tools still ask.
+- **Full Access** — no card at all. Owner, delegated-credential, tool-policy, and containment restrictions still apply.
+
+The level is stored on the session row and re-clamped on every request from the authenticated owner, so a page cannot raise its own level. A bearer token cannot answer an approval, so token runs keep the legacy external-context gate instead of an asking level; an explicit Read Only choice still restricts them. Chats that existed before the menu were migrated to Auto to preserve their previous behaviour.
+
 ## Security Headers
 
 `core/middleware.py:SecurityHeadersMiddleware` sets headers on every response:

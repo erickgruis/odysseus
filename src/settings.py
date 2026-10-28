@@ -120,6 +120,10 @@ DEFAULT_SETTINGS = {
     "research_run_timeout_seconds": 1800,
     "agent_max_tool_calls": 0,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
+    # Default interactive tool access level for new chats. See src.tool_access:
+    # read_only | ask | auto | full_access. Existing chats store their own
+    # value on the session row.
+    "tool_access_default": "ask",
     # Soft input-token budget for the agent loop. The DEFAULT value (6000) is the
     # "auto" sentinel: it means "scale the budget to the model's context window"
     # (#1230) — so long-context models aren't capped at 6000. Set ANY OTHER value

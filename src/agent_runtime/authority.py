@@ -224,10 +224,19 @@ class RequestAuthority:
 
     def restrict(self, policy=None, disabled_tools=()):
         policy = policy or ToolPolicy()
-        return replace(self, denied=self.denied | frozenset(
-            canonical_tool(n) for n in set(disabled_tools or ()) | policy.all_disabled_names()),
-            block_all=self.block_all or policy.block_all_tool_calls,
-            disable_mcp=self.disable_mcp or policy.disable_mcp)
+        denied = self.denied | frozenset(
+            canonical_tool(n) for n in set(disabled_tools or ()) | policy.all_disabled_names())
+        block_all = self.block_all or policy.block_all_tool_calls
+        disable_mcp = self.disable_mcp or policy.disable_mcp
+        if (denied, block_all, disable_mcp) == (
+                self.denied, self.block_all, self.disable_mcp):
+            # A restriction that adds nothing is not a new child scope. Keep
+            # object identity so rebinding the same authority is not mistaken
+            # for an intersection (which marks it inherited and blocks exact
+            # approvals from consuming their sealed process claim).
+            return self
+        return replace(self, denied=denied, block_all=block_all,
+                       disable_mcp=disable_mcp)
 
     def intersect(self, child):
         if not isinstance(child, RequestAuthority):
@@ -270,6 +279,27 @@ class RequestAuthority:
                        job_resources=tuple(r for r in self.job_resources if r.thread_id == rebound),
                        browser_sessions=tuple(r for r in self.browser_sessions if r.thread_id == rebound),
                        browser_pages=tuple(r for r in self.browser_pages if r.session.thread_id == rebound))
+
+    def narrows(self, parent):
+        """Whether this only tightens `parent`, rather than starting a child scope.
+
+        Re-applying a turn's policy produces a new authority object with the
+        same grants and only extra denials. Intersecting that with its own
+        parent would mark it inherited, and an inherited authority may not
+        consume an exact approval, so the tool's own restriction would block
+        the approved run.
+        """
+        return (isinstance(parent, RequestAuthority)
+                and (self.request_id, self.owner, self.session_id, self.workspace)
+                    == (parent.request_id, parent.owner, parent.session_id, parent.workspace)
+                and self.grants == parent.grants
+                and all(getattr(self, field) == getattr(parent, field) for field in (
+                    "resource_roots", "backend_resources", "owned_scopes",
+                    "launch_scopes", "process_resources", "job_resources",
+                    "browser_sessions", "browser_pages"))
+                and self.denied >= parent.denied
+                and (self.block_all or not parent.block_all)
+                and (self.disable_mcp or not parent.disable_mcp))
 
     def to_dict(self):
         return {"version": 5, "request_id": self.request_id, "owner": self.owner,
@@ -450,7 +480,12 @@ def bind_request_authority(authority):
     if not isinstance(authority, RequestAuthority):
         raise TypeError("Authority must be server-owned RequestAuthority")
     parent = _ACTIVE.get()
-    authority = parent.intersect(authority) if parent is not None else authority
+    # Rebinding the same request (even narrowed by a re-applied tool policy) is
+    # not a child scope. Treating it as one marked it inherited, and an
+    # inherited authority may not consume an exact approval, so an approved
+    # tool run was refused at producer admission.
+    if parent is not None and authority is not parent and not authority.narrows(parent):
+        authority = parent.intersect(authority)
     token = _ACTIVE.set(authority)
     try:
         yield authority

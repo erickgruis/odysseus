@@ -7870,3 +7870,173 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-size: 12px; white-space: nowrap; transition: all 0.15s;
       font-family: inherit; width: 100%;
     }
+
+/* ── Agent tool access level (composer pill + menu) ──────────────────────
+   Selects one of src.tool_access's four levels. This is UI only: the chat
+   route stores the value on the session and the agent loop enforces it. */
+.access-level-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.access-level-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.access-level-btn:hover,
+.access-level-btn:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  outline: none;
+}
+.access-level-btn.is-readonly {
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.access-level-btn.is-risk {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 42%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+.access-level-icon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+.access-level-chevron {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.access-level-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 260;
+  width: 272px;
+  max-width: min(272px, calc(100vw - 32px));
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+.access-level-menu.hidden {
+  display: none;
+}
+.access-level-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.access-level-option:hover,
+.access-level-option:focus-visible {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  outline: none;
+}
+.access-level-option.is-selected {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.access-level-option.is-selected .access-level-option-icon {
+  color: var(--accent, var(--red));
+}
+.access-level-option.is-risk .access-level-option-label,
+.access-level-option.is-risk .access-level-option-icon {
+  color: var(--red);
+}
+.access-level-option.is-disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.access-level-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.access-level-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.access-level-option-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.access-level-option-tag {
+  padding: 1px 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+.access-level-option-desc {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--fg) 48%, transparent);
+}
+.access-level-hint {
+  margin-top: 4px;
+  padding: 7px 8px 3px;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--fg) 46%, transparent);
+}
+/* Read Only removes shell/write tools from the request; dim the shell toggle
+   so it does not advertise an action the level refuses. */
+body.tool-access-read-only #bash-toggle-btn {
+  opacity: 0.35;
+}
+body.tool-access-read-only #bash-toggle-btn::after {
+  content: '';
+}
+@container chatbar (max-width: 420px) {
+  .access-level-btn #access-level-label {
+    display: none;
+  }
+  .access-level-btn {
+    padding: 0 7px;
+  }
+}
+@container chatbar (max-width: 340px) {
+  .access-level-wrap {
+    display: none !important;
+  }
+}

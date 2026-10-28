@@ -7,6 +7,7 @@ import re
 import time
 import logging
 import re as _re
+from dataclasses import replace
 from urllib.parse import urlparse
 from datetime import datetime
 from typing import Dict, Any, AsyncGenerator, List, Optional
@@ -57,7 +58,7 @@ from src.auth_helpers import (
 )
 from routes.session_routes import _verify_session_owner
 from routes.document_helpers import _owner_session_filter
-from core.database import SessionLocal, get_session_mode, set_session_mode
+from core.database import get_db_session, SessionLocal, get_session_mode, set_session_mode
 from core.database import Session as DBSession, ChatMessage as DBChatMessage, Note
 from core.database import Document as DBDocument, ModelEndpoint
 from core.log_safety import redact_url
@@ -1132,6 +1133,27 @@ def _client_runtime_context_cwd(context: Dict[str, Any]) -> str:
     return backend_workspace_path(cwd)[:400]
 
 
+def _persist_session_access_level(session_id: str, access_level: str) -> bool:
+    """Persist a session's interactive access level. Best-effort.
+
+    The browser keeps a copy for display, but enforcement always reads the
+    stored value, so a stale or forged page cannot raise its own level.
+    """
+    if not session_id or not access_level:
+        return False
+    try:
+        with get_db_session() as db:
+            db.query(DBSession).filter(DBSession.id == session_id).update(
+                {"access_level": access_level}
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "Failed to persist access level %r for session %s", access_level, session_id
+        )
+        return False
+
+
 def _agent_turn_cwd(sess: Any, client_runtime_context: Optional[Dict[str, Any]]) -> Optional[str]:
     """cwd for an agent turn.
 
@@ -1312,7 +1334,7 @@ def _mark_tool_approval_resolved(sess, approval_id: Any, decision: Any) -> bool:
 
     approval_key = str(approval_id or "")
     normalized_decision = str(decision or "").strip().lower()
-    if not approval_key or normalized_decision not in {"approve", "approve_task", "deny"}:
+    if not approval_key or normalized_decision not in {"approve", "approve_task", "approve_once", "deny"}:
         return False
 
     message_id = None
@@ -2518,6 +2540,11 @@ def setup_chat_routes(
                 raise HTTPException(400, "temperature must be a number between 0 and 2")
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         plan_mode = str(form_data.get("plan_mode") or (body or {}).get("plan_mode") or "").lower() == "true"
+        # Interactive access level. The browser sends a *request* for a level;
+        # it is normalized and clamped server-side below.
+        requested_access_level = str(
+            form_data.get("access_level") or (body or {}).get("access_level") or ""
+        ).strip()
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
         client_runtime_context = None
         raw_client_runtime_context = (
@@ -2832,7 +2859,7 @@ def setup_chat_routes(
                     external_untrusted_context_seen or pending_taint
                 )
                 decision = str(tool_approval_decision or "").strip().lower()
-                if decision not in {"approve", "approve_task", "deny"}:
+                if decision not in {"approve", "approve_task", "approve_once", "deny"}:
                     raise HTTPException(400, "Invalid tool approval decision.")
                 if plan_mode:
                     raise HTTPException(
@@ -2847,7 +2874,7 @@ def setup_chat_routes(
                 )
                 tool_approval_continuation = True
                 if (
-                    decision in {"approve", "approve_task"}
+                    decision in {"approve", "approve_task", "approve_once"}
                     and exact_tool_approval is None
                 ):
                     raise HTTPException(
@@ -3485,6 +3512,42 @@ def setup_chat_routes(
                 chat_mode = 'chat'
         # Global admin disabled tools
         from src.settings import get_setting
+
+        # Interactive access level (src.tool_access). Resolve it from the
+        # request, then the session, then the app default. A bearer token and a
+        # non-admin are clamped here, before the level influences any policy.
+        from src.tool_access import (
+            DEFAULT_LEVEL as _DEFAULT_ACCESS_LEVEL,
+            clamp_access_level,
+            enforced_level,
+            normalize_access_level,
+        )
+        from src.tool_security import owner_is_admin_or_single_user
+
+        _stored_access_level = normalize_access_level(
+            getattr(sess, "access_level", None), default=None
+        )
+        access_level = clamp_access_level(
+            requested_access_level
+            or _stored_access_level
+            or get_setting("tool_access_default")
+            or _DEFAULT_ACCESS_LEVEL,
+            admin=owner_is_admin_or_single_user(_user),
+            delegated=_delegated_credential,
+            default=_DEFAULT_ACCESS_LEVEL,
+        )
+        # A token caller cannot answer a card, so its run keeps the legacy
+        # gate; Read Only still restricts it. Never let that display clamp
+        # rewrite the level a human stored for this chat.
+        run_access_level = enforced_level(
+            access_level, delegated=_delegated_credential
+        )
+        if not _delegated_credential and access_level != _stored_access_level:
+            sess.access_level = access_level
+            _persist_session_access_level(
+                str(getattr(sess, "id", "") or ""), access_level
+            )
+
         _global_disabled = get_setting("disabled_tools", [])
         if _global_disabled and isinstance(_global_disabled, list):
             disabled_tools.update(_global_disabled)
@@ -3526,10 +3589,20 @@ def setup_chat_routes(
             from src.tool_security import plan_mode_disabled_tools
             disabled_tools.update(plan_mode_disabled_tools())
 
+        # Interactive access level. Read Only composes the same allowlist plan
+        # mode uses and drops MCP, so the tool schema the model sees already
+        # excludes mutating tools. The remaining levels are enforced per call
+        # in the agent loop (src.tool_access.requires_approval).
+        from src.tool_access import disable_mcp_for, disabled_tools_for
+        if disable_mcp_for(access_level):
+            disabled_tools.update(disabled_tools_for(access_level))
+
         tool_policy = build_effective_tool_policy(
             disabled_tools=disabled_tools,
             last_user_message=message,
         )
+        if disable_mcp_for(access_level):
+            tool_policy = replace(tool_policy, disable_mcp=True)
         if str(_user or "").startswith("sft_"):
             logger.info(
                 "[sft-policy-audit] owner=%s personal_disabled=%s "
@@ -4634,6 +4707,7 @@ def setup_chat_routes(
                         fallback_on_empty=_foreground_policy.fallback_on_empty,
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
+                        access_level=run_access_level,
                         workspace=workspace or None,
                         relevant_tools=(
                             set(pending_tool_approval.selected_tools)

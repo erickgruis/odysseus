@@ -124,6 +124,28 @@ async def test_inherited_authority_without_a_workspace_still_cannot_widen(agent_
     assert result.get("blocked") is True
 
 
+def test_unsafe_launch_root_refuses_the_card_instead_of_promising_execution(tmp_path, monkeypatch):
+    # A workspace that contains server control state cannot be a launch
+    # boundary. The card is refused up front with guidance, rather than being
+    # offered and then failing at execution.
+    from src.tool_approvals import ApprovalUnavailable
+    import src.agent_runtime.process_resources as process_resources
+
+    workspace = tmp_path / "project"
+    (workspace / "data").mkdir(parents=True)
+    control = workspace / "data" / "app.db"
+    control.write_text("", encoding="utf-8")
+    monkeypatch.setattr(process_resources, "_launch_control_paths", lambda: (control,))
+
+    authority = _authority(workspace, "get_workspace")
+    with pytest.raises(ApprovalUnavailable) as raised:
+        _approve(authority, "bash", "printf approved-run")
+
+    message = str(raised.value)
+    assert "server state" in message
+    assert "outside the Odysseus install" in message
+
+
 async def test_approved_write_without_a_workspace_lands_in_the_agent_workspace(agent_workspace):
     # write_file had the same gap: with no workspace the approval sealed no
     # root, so "approve" ended in "no sealed resource identity".

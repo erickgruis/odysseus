@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # it now selects chat-session scope.
 TASK_APPROVAL_DECISION = "approve_task"
 CHAT_SESSION_APPROVAL_DECISION = "approve"
+# One sealed action, then the gate re-arms. This is what the card calls
+# "Allow once"; it deliberately carries no continuation grant.
+SINGLE_APPROVAL_DECISION = "approve_once"
 DENY_APPROVAL_DECISION = "deny"
 
 # Session.get_context_messages() adds this server-owned marker only when the
@@ -157,4 +160,12 @@ def scope_for_decision(decision: object) -> ToolApprovalScope | None:
         return ToolApprovalScope.TASK
     if normalized == CHAT_SESSION_APPROVAL_DECISION:
         return ToolApprovalScope.CHAT_SESSION
+    if normalized == SINGLE_APPROVAL_DECISION:
+        return ToolApprovalScope.SINGLE_ACTION
     return None
+
+
+def grants_continuation(scope: ToolApprovalScope) -> bool:
+    """Whether *scope* also lifts the gate for the rest of the task/chat."""
+
+    return scope in (ToolApprovalScope.TASK, ToolApprovalScope.CHAT_SESSION)

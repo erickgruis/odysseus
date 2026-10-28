@@ -237,6 +237,9 @@ class Session(TimestampMixin, Base):
     total_cost_usd = Column(Float, default=0.0)
     mode = Column(String, nullable=True)  # 'agent', 'chat', or 'research'
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
+    # Interactive tool access level (src.tool_access). NULL on rows created
+    # before this column; those fall back to the app default at read time.
+    access_level = Column(String, nullable=True, default="ask")
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -1059,6 +1062,35 @@ def _migrate_add_session_generation_settings_columns():
     finally:
         if conn is not None:
             conn.close()
+
+def _migrate_add_session_access_level_column():
+    """Add per-session interactive tool access level."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "access_level" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN access_level VARCHAR")
+            # Chats that existed before the menu keep their old behaviour:
+            # no per-call prompts. New rows get the model default ('ask').
+            conn.execute(
+                "UPDATE sessions SET access_level = 'auto' "
+                "WHERE access_level IS NULL OR access_level = ''"
+            )
+            conn.commit()
+            logging.getLogger(__name__).info(
+                "Migrated: added 'access_level' to sessions (existing chats: auto)"
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"session access_level migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
 
 def _migrate_add_document_archived_column():
     """Add `archived` to documents (soft-archive flag). Guarded + idempotent."""
@@ -2405,6 +2437,7 @@ def init_db():
     _migrate_add_memory_injection_enabled_column()
     _migrate_add_skill_injection_enabled_column()
     _migrate_add_session_generation_settings_columns()
+    _migrate_add_session_access_level_column()
     _migrate_add_folder_column()
     _migrate_add_session_cwd_column()
     _migrate_add_session_endpoint_id_column()

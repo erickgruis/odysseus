@@ -376,22 +376,50 @@ def require_process_admission(bound):
             raise ResourceIdentityError("Producer operation has no request admission or exact claim")
 
 
+def _launch_control_paths():
+    from src import bg_jobs, containment, constants
+    from src import browser_identity
+    return (
+        Path(bg_jobs._STORE),
+        Path(bg_jobs._JOBS_DIR),
+        containment._store_path(),
+        _LAUNCH_DIR,
+        Path(constants.BROWSER_RESOURCES_DIR),
+        browser_identity.STATE_ROOT,
+        Path(constants.APP_DB),
+        Path(constants.AUTH_FILE),
+        Path(constants.SETTINGS_FILE),
+    )
+
+
+def launch_workspace_conflict(root):
+    """Return a human reason when *root* contains server control state.
+
+    This is the cheap containment half of :func:`guard_launch_workspace`: it
+    answers before an approval card is offered whether the sealed launch root
+    can possibly pass the final guard.  The symlink/alias walk stays in the
+    guard because it is only authoritative at execution time.
+    """
+    base = Path(root.path)
+    if any(Path(p).resolve().is_relative_to(base) for p in _launch_control_paths()):
+        return (
+            "This folder contains Odysseus server state (database, settings, "
+            "or runtime files), so shell commands cannot run here safely."
+        )
+    return None
+
+
 def guard_launch_workspace(root):
     """Reject a boundary containing execution control state or its aliases.
 
     These are pathname/inode observations, not an atomic kernel access policy.
     They do not claim freedom from concurrent link replacement after checking.
     """
-    from src import bg_jobs, containment, constants
-    from src import browser_identity
     from src.agent_runtime.resources import _control_plane_path, _control_plane_snapshot
-    control = (Path(bg_jobs._STORE), Path(bg_jobs._JOBS_DIR), containment._store_path(), _LAUNCH_DIR,
-               Path(constants.BROWSER_RESOURCES_DIR),
-               browser_identity.STATE_ROOT,
-               Path(constants.APP_DB), Path(constants.AUTH_FILE), Path(constants.SETTINGS_FILE))
-    base = Path(root.path)
-    if any(Path(p).resolve().is_relative_to(base) for p in control):
+    conflict = launch_workspace_conflict(root)
+    if conflict:
         raise ResourceIdentityError("Launch boundary contains server control state")
+    base = Path(root.path)
     def unresolved(error):
         raise ResourceIdentityError("Launch workspace cannot be inspected") from error
     snapshot = None

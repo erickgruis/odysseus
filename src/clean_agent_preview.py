@@ -5236,6 +5236,7 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
                          session_id, owner, disabled_tools, tool_policy,
                          history_session=None, external_untrusted_context_seen=False,
                          delegated_credential=False,
+                         access_level=None,
                          active_document=None, active_email=None, workspace=None,
                          client_runtime_context=None, max_tokens=768, max_rounds=8,
                          max_tool_calls=0,
@@ -5473,6 +5474,7 @@ async def stream_preview(*, endpoint_url, model, messages, headers, turn_contrac
     security = ToolRunSecurityContext(
         external_untrusted_context_seen=bool(external_untrusted_context_seen),
         delegated_credential=bool(delegated_credential),
+        access_level=access_level,
         unattended_tools=(
             NATIVE_WORKSPACE_TOOLS if native_workspace_enabled else frozenset()
         ),
