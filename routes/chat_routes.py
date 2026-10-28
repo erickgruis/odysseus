@@ -3851,7 +3851,6 @@ def setup_chat_routes(
             disabled_tools.difference_update(_turn_contract.offered)
             _routed_turn_contract = _turn_contract
             if _clean_v3_preview:
-                from dataclasses import replace
                 from src.clean_agent_preview import (
                     INTERACTIVE_CORE_TOOLS, MODE, NATIVE_WORKSPACE_TOOLS, PREVIEW_TOOLS, canonical,
                     scope_preview_contract,

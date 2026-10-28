@@ -748,3 +748,23 @@ def test_frontend_sends_explicit_allow_web_search_false_in_agent_mode():
     assert "fd.append('allow_web_search', el('web-toggle').checked ? 'true' : 'false')" in source, (
         "Frontend must send explicit allow_web_search=false in agent mode when toggle is off"
     )
+
+
+def test_chat_route_does_not_shadow_module_level_replace():
+    # The read-only access level applies tool_policy = replace(...) early in
+    # the chat handler. A function-local `from dataclasses import replace`
+    # makes the name local for the whole function, so that early use raised
+    # UnboundLocalError and every Read Only chat request returned 500.
+    tree = ast.parse(_CHAT_ROUTES.read_text(encoding="utf-8"))
+    imports = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "dataclasses"
+        and any(alias.name == "replace" for alias in node.names)
+    ]
+    module_level = [node for node in imports if node in tree.body]
+    assert module_level, "chat_routes must import replace at module scope"
+    assert imports == module_level, [
+        node.lineno for node in imports if node not in module_level
+    ]
