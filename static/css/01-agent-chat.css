@@ -8007,7 +8007,10 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
      selected pill and the hover highlight) stop mid-description and clip the
      text, so opt out of the inherited height and let padding size the row. */
   height: auto;
-  padding: 6px 8px;
+  /* Asymmetric by 1px: the label's text box sits ~1px higher than its line
+     box, so equal padding renders the row background ~1px low relative to
+     the text. One extra pixel on top centres the highlight on the text. */
+  padding: 7px 8px 5px;
   border: none;
   border-radius: 8px;
   background: transparent;
