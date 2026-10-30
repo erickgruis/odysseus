@@ -8002,6 +8002,11 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
   align-items: flex-start;
   gap: 8px;
   width: 100%;
+  /* The base layer sets `button { height: 32px }`, which is shorter than one
+     label + description row (~47px). Without this the row backgrounds (the
+     selected pill and the hover highlight) stop mid-description and clip the
+     text, so opt out of the inherited height and let padding size the row. */
+  height: auto;
   padding: 8px;
   border: none;
   border-radius: 8px;
@@ -8071,8 +8076,10 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
   color: color-mix(in srgb, var(--fg) 48%, transparent);
 }
 .access-level-hint {
-  margin-top: 4px;
-  padding: 7px 8px 3px;
+  /* Extra breathing room between the last option (Full Access) and the
+     explanation footer, on top of the menu's 2px flex gap. */
+  margin-top: 10px;
+  padding: 9px 8px 4px;
   border-top: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
   font-size: 10.5px;
   line-height: 1.45;
