@@ -7988,7 +7988,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
   padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -8007,7 +8007,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
      selected pill and the hover highlight) stop mid-description and clip the
      text, so opt out of the inherited height and let padding size the row. */
   height: auto;
-  padding: 8px;
+  padding: 6px 8px;
   border: none;
   border-radius: 8px;
   background: transparent;
