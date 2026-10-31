@@ -23892,6 +23892,10 @@ async def stream_agent_loop(
             for schema in FUNCTION_TOOL_SCHEMAS
         }
         _core_agent_tools.difference_update(_hard_blocked_tools)
+        # Never re-offer a tool this turn's policy disabled (for example bash
+        # when the shell toggle is off): the model would call it and get
+        # "disabled by request authority policy" on every attempt.
+        _core_agent_tools.difference_update(set(disabled_tools))
         _relevant_tools.update(_core_agent_tools)
         if _base_relevant_tools is None:
             _base_relevant_tools = set(_core_agent_tools)

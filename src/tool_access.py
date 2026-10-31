@@ -138,6 +138,85 @@ def is_read_only(value: object) -> bool:
     return normalize_access_level(value, default=None) == READ_ONLY
 
 
+def widen_authority_for_level(
+    authority,
+    level: object,
+    tool_names: Iterable[str] | None = None,
+):
+    """Grant the tools an interactive level is allowed to reach.
+
+    Request authority used to be derived only from the wording of the latest
+    message, which meant an explicit user decision (Ask + approval, or Full
+    Access) could not admit a tool the sentence did not mention: the call was
+    refused with ``request_authority_denied`` before the approval card could
+    help. The level is the user's permission choice, so it now widens the
+    grant set:
+
+    * ``read_only`` never widens - its allowlist is a denial, not a grant.
+    * ``ask`` grants every offered tool; each mutating call still raises the
+      exact-approval card.
+    * ``auto`` grants the same set and still prompts for network/destructive
+      effects.
+    * ``full_access`` grants the same set and prompts for nothing.
+
+    Denials from the tool policy, the caller, containment and ownership are
+    applied afterwards by ``RequestAuthority.restrict`` and still win.
+    """
+
+    resolved = normalize_access_level(level, default=None)
+    if resolved is None or resolved == READ_ONLY:
+        return authority
+
+    from src.agent_runtime.authority import OperationGrant
+    from src.turn_contract import canonical_tool
+
+    names = [name for name in (tool_names or ()) if name]
+    if not names:
+        try:
+            from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+            names = [
+                (schema.get("function") or {}).get("name") or schema.get("name")
+                for schema in FUNCTION_TOOL_SCHEMAS
+            ]
+        except Exception:  # pragma: no cover - defensive import guard
+            names = []
+
+    granted = []
+    seen = set()
+    for grant in authority.grants:
+        canonical = canonical_tool(grant.tool)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        granted.append(grant if canonical == grant.tool else OperationGrant(canonical))
+    for name in names:
+        canonical = canonical_tool(name)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        granted.append(OperationGrant(canonical))
+
+    if len(granted) == len(authority.grants):
+        return authority
+    # Rebuild through ``replace`` with the sealed caches cleared so
+    # ``__post_init__`` reseals backend resources, owned scopes and launch
+    # scopes for the newly granted tools (a plain grant union would leave
+    # bash/python without the launch scope its executor requires).
+    from dataclasses import replace
+
+    return replace(
+        authority,
+        grants=tuple(granted),
+        backend_resources=None,
+        owned_scopes=None,
+        launch_scopes=None,
+        job_resources=None,
+        browser_sessions=None,
+        browser_pages=None,
+    )
+
+
 def label_for(value: object) -> str:
     return _LABELS.get(normalize_access_level(value, default=None) or "", "Ask")
 

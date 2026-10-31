@@ -541,6 +541,14 @@ def with_request_authority(func):
             raise TypeError("Missing or malformed server request authority")
         if parent is None and parameters.get("exact_approval") is not None:
             authority = replace(authority, inherited=False)
+        # The interactive level is the user's permission decision: Ask still
+        # cards every mutating call, Auto still asks before network/destructive
+        # effects, Full Access asks nothing. Widening the grant set here keeps
+        # an approved shell command from being refused merely because the
+        # latest sentence did not mention a shell. Policy denials still win.
+        from src.tool_access import widen_authority_for_level
+        if not authority.inherited:
+            authority = widen_authority_for_level(authority, parameters.get("access_level"))
         authority = authority.restrict(parameters.get("tool_policy"), parameters.get("disabled_tools"))
         with bind_request_authority(authority) as effective:
             if "request_authority" in parameters:

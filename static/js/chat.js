@@ -9,7 +9,7 @@ import Storage from './storage.js';
 import uiModule from './ui.js?v=20260916largetoolscroll1';
 import sessionModule from './sessions.js';
 import chatRenderer, { renderToolIcon } from './chatRenderer.js?v=20260914metricssummary1';
-import chatStream from './chatStream.js?v=20261026devsync1';
+import chatStream from './chatStream.js?v=20261030approvalfix4';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
@@ -504,8 +504,21 @@ import { currentAccessLevel } from './toolAccess.js?v=20261027toolaccess1';
     if (input) {
       _pendingToolApproval.draft = input.value || '';
     }
-    const sendButton = document.querySelector('.send-btn');
-    if (sendButton) sendButton.click();
+    // Call the send path directly. Neither alternative works: .send-btn is
+    // polymorphic (with an empty composer it means "New chat"), and #chat-form
+    // has no submit listener, so requestSubmit() is a no-op. handleChatSubmit
+    // is the same entry point a real Send uses and it consumes
+    // _pendingToolApproval.
+    const submission = handleChatSubmit({ preventDefault() {} });
+    // handleChatSubmit captured the approval synchronously. Release it now so
+    // a duplicate card event cannot submit the same sealed action twice (the
+    // second request would 409 because the approval is already consumed).
+    if (_pendingToolApproval && _pendingToolApproval.approval_id === approvalId) {
+      _pendingToolApproval = null;
+    }
+    Promise.resolve(submission).catch((error) => {
+      console.error('Tool approval submit failed:', error);
+    });
   }
 
   document.addEventListener('odysseus:tool-approval', (event) => {
