@@ -240,6 +240,9 @@ class Session(TimestampMixin, Base):
     # Interactive tool access level (src.tool_access). NULL on rows created
     # before this column; those fall back to the app default at read time.
     access_level = Column(String, nullable=True, default="ask")
+    # Per-chat MCP server opt-out: JSON list of server ids whose tools this
+    # chat must not offer. NULL/empty means "offer every enabled server".
+    mcp_disabled_servers = Column(Text, nullable=True)
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -1087,6 +1090,31 @@ def _migrate_add_session_access_level_column():
             )
     except Exception as e:
         logging.getLogger(__name__).warning(f"session access_level migration failed: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _migrate_add_session_mcp_disabled_servers_column():
+    """Add the per-chat MCP server opt-out list (JSON text)."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "mcp_disabled_servers" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN mcp_disabled_servers TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info(
+                "Migrated: added 'mcp_disabled_servers' to sessions"
+            )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"session mcp_disabled_servers migration failed: {e}"
+        )
     finally:
         if conn is not None:
             conn.close()
@@ -2438,6 +2466,7 @@ def init_db():
     _migrate_add_skill_injection_enabled_column()
     _migrate_add_session_generation_settings_columns()
     _migrate_add_session_access_level_column()
+    _migrate_add_session_mcp_disabled_servers_column()
     _migrate_add_folder_column()
     _migrate_add_session_cwd_column()
     _migrate_add_session_endpoint_id_column()

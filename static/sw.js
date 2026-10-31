@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v1116-approval-submit';
+const CACHE_NAME = 'odysseus-v1117-mcp-picker';
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -60,7 +60,7 @@ const PRECACHE = [
   '/static/css/documents-gallery-editor.css?v=20261029toolaccess1',
   '/static/css/email-calendar-notes-tasks.css?v=20261029toolaccess1',
   '/static/css/cookbook-research-memory-settings.css?v=20261029toolaccess1',
-  '/static/app.js?v=20261029toolaccess1',
+  '/static/app.js?v=20261030mcpaccess2',
   '/static/js/storage.js',
   '/static/js/appConfig.js',
   '/static/js/ui.js?v=20260916largetoolscroll1',
@@ -88,7 +88,8 @@ const PRECACHE = [
   '/static/js/chatRenderer.js?v=20260914metricssummary1',
   '/static/js/codeRunner.js?v=20260831richtexttools91',
   '/static/js/chatStream.js?v=20261030approvalfix4',
-  '/static/js/chat.js?v=20261030approvalfix4',
+  '/static/js/chat.js?v=20261030mcpaccess2',
+  '/static/js/mcpAccess.js?v=20261030mcpaccess2',
   '/static/js/cookbook.js',
   '/static/js/search-chat.js',
   '/static/js/compare/index.js?v=20260909mobilepaneaddscroll1',

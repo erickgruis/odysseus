@@ -99,3 +99,55 @@ async def test_agent_loop_binds_the_widened_authority(tmp_path):
         workspace=str(tmp_path),
     ):
         assert not bound.permits(BASH)
+
+
+class _FakeMcpManager:
+    def get_all_tools(self):
+        return [
+            {"server_id": "custom", "name": "jev_classify",
+             "qualified_name": "mcp__custom__jev_classify"},
+        ]
+
+
+CUSTOM_MCP = ExactOperation.normalize("mcp__custom__jev_classify", "{}")
+
+
+def test_full_access_grants_custom_mcp_tools(monkeypatch, tmp_path):
+    import src.tool_utils as tool_utils
+
+    monkeypatch.setattr(tool_utils, "_mcp_manager", _FakeMcpManager())
+    authority = create_request_authority(
+        "look at the machine on the local network",
+        owner="alice", session_id="s", workspace=str(tmp_path),
+    )
+    assert not authority.permits(CUSTOM_MCP)
+
+    widened = widen_authority_for_level(authority, FULL_ACCESS)
+    assert widened.permits(CUSTOM_MCP)
+
+
+def test_read_only_never_grants_custom_mcp(monkeypatch, tmp_path):
+    import src.tool_utils as tool_utils
+
+    monkeypatch.setattr(tool_utils, "_mcp_manager", _FakeMcpManager())
+    authority = create_request_authority(
+        "look at the machine on the local network",
+        owner="alice", session_id="s", workspace=str(tmp_path),
+    )
+    assert not widen_authority_for_level(authority, READ_ONLY).permits(CUSTOM_MCP)
+
+
+def test_per_chat_mcp_opt_out_wins_over_the_level(monkeypatch, tmp_path):
+    import src.tool_utils as tool_utils
+
+    monkeypatch.setattr(tool_utils, "_mcp_manager", _FakeMcpManager())
+    authority = create_request_authority(
+        "look at the machine on the local network",
+        owner="alice", session_id="s", workspace=str(tmp_path),
+    )
+    widened = widen_authority_for_level(authority, FULL_ACCESS)
+    restricted = widened.restrict(
+        ToolPolicy(disabled_tools=frozenset({"mcp__custom__jev_classify"}))
+    )
+    assert restricted.restricted(CUSTOM_MCP)
+    assert not restricted.permits(CUSTOM_MCP)

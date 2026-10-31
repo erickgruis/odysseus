@@ -21247,6 +21247,7 @@ async def stream_agent_loop(
     fallback_on_empty: bool = True,
     plan_mode: bool = False,
     access_level: Optional[str] = None,
+    disabled_mcp_servers: Optional[Set[str]] = None,
     approved_plan: Optional[str] = None,
     tool_policy: Optional[ToolPolicy] = None,
     workspace: Optional[str] = None,
@@ -22255,6 +22256,17 @@ async def stream_agent_loop(
             _last_user[:80],
         )
     _mcp_disabled_map = _load_mcp_disabled_map() if mcp_mgr else {}
+    if mcp_mgr and disabled_mcp_servers:
+        _opted_out = set(disabled_mcp_servers)
+        for _tool in mcp_mgr.get_all_tools():
+            if _tool.get("server_id") not in _opted_out:
+                continue
+            _mcp_disabled_map.setdefault(_tool["server_id"], set()).add(_tool["name"])
+            disabled_tools.add(_tool.get("qualified_name") or "")
+        disabled_tools.discard("")
+        logger.info(
+            "[agent-intent] per-chat MCP opt-out=%s", sorted(_opted_out)
+        )
     if turn_contract is not None and turn_contract.selection_mode == "full_compact_experiment":
         _direct_low_signal = False
     if _direct_low_signal:

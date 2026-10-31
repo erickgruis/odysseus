@@ -12,7 +12,7 @@ import json
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import func
 
@@ -23,6 +23,19 @@ from src.upload_handler import reserve_message_upload_references
 
 # Re-export singleton accessors from models for convenience
 from .models import set_session_manager_instance, get_session_manager_instance
+
+
+def _parse_mcp_disabled_servers(raw) -> List[str]:
+    """Decode the per-chat MCP opt-out list stored as JSON text."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    return sorted({str(item).strip() for item in value if str(item).strip()})
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +172,9 @@ class SessionManager:
             cwd=getattr(db_session, "cwd", None) or None,
             endpoint_id=getattr(db_session, "endpoint_id", None) or None,
             access_level=getattr(db_session, "access_level", None) or "ask",
+            mcp_disabled_servers=_parse_mcp_disabled_servers(
+                getattr(db_session, "mcp_disabled_servers", None)
+            ),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
         return session
@@ -226,6 +242,9 @@ class SessionManager:
             cwd=getattr(db_session, "cwd", None) or None,
             endpoint_id=getattr(db_session, "endpoint_id", None) or None,
             access_level=getattr(db_session, "access_level", None) or "ask",
+            mcp_disabled_servers=_parse_mcp_disabled_servers(
+                getattr(db_session, "mcp_disabled_servers", None)
+            ),
         )
 
         # The rows just loaded are the whole transcript, so they — not the
@@ -570,6 +589,7 @@ class SessionManager:
         headers: Optional[Dict[str, str]] = None,
         endpoint_id: Optional[str] = None,
         access_level: str = "ask",
+        mcp_disabled_servers: Optional[List[str]] = None,
     ) -> Session:
         """Create a new session and save to database."""
         from src.chatgpt_subscription import is_chatgpt_subscription_base
@@ -588,6 +608,7 @@ class SessionManager:
                 cwd=cwd or None,
                 endpoint_id=endpoint_id,
                 access_level=access_level or "ask",
+                mcp_disabled_servers=json.dumps(sorted(set(mcp_disabled_servers or ()))),
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -605,6 +626,7 @@ class SessionManager:
                 cwd=cwd or None,
                 endpoint_id=endpoint_id,
                 access_level=access_level or "ask",
+                mcp_disabled_servers=sorted(set(mcp_disabled_servers or ())),
             )
 
             self.sessions[session_id] = session

@@ -1157,6 +1157,44 @@ def _persist_session_access_level(session_id: str, access_level: str) -> bool:
         return False
 
 
+def _parse_mcp_disabled_payload(raw: Any) -> Optional[list[str]]:
+    """Parse a client MCP opt-out list; None means "not supplied"."""
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value, (list, tuple)):
+        return None
+    out = []
+    for item in value:
+        server_id = str(item or "").strip()
+        if not server_id or len(server_id) > 128:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", server_id):
+            continue
+        out.append(server_id)
+    return sorted(set(out))
+
+
+def _persist_session_mcp_servers(session_id: str, servers: list[str]) -> bool:
+    """Persist a session's per-chat MCP opt-out list. Best-effort."""
+    if not session_id:
+        return False
+    try:
+        with get_db_session() as db:
+            db.query(DBSession).filter(DBSession.id == session_id).update(
+                {"mcp_disabled_servers": json.dumps(sorted(set(servers)))}
+            )
+        return True
+    except Exception:
+        logger.warning(
+            "Failed to persist MCP opt-out %s for session %s", servers, session_id
+        )
+        return False
+
+
 def _agent_turn_cwd(sess: Any, client_runtime_context: Optional[Dict[str, Any]]) -> Optional[str]:
     """cwd for an agent turn.
 
@@ -2548,6 +2586,13 @@ def setup_chat_routes(
         requested_access_level = str(
             form_data.get("access_level") or (body or {}).get("access_level") or ""
         ).strip()
+        # Per-chat MCP opt-out. A new chat has no session row yet, so the first
+        # message carries the selection and the route persists it below.
+        raw_mcp_disabled = (
+            form_data.get("mcp_disabled_servers")
+            or (body or {}).get("mcp_disabled_servers")
+        )
+        requested_mcp_disabled = _parse_mcp_disabled_payload(raw_mcp_disabled)
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
         client_runtime_context = None
         raw_client_runtime_context = (
@@ -3599,6 +3644,23 @@ def setup_chat_routes(
             _persist_session_access_level(
                 str(getattr(sess, "id", "") or ""), access_level
             )
+
+        # Per-chat MCP selection. Read Only already drops every MCP tool; this
+        # list only narrows the rest. A delegated token cannot edit it.
+        _stored_mcp_disabled = sorted(
+            set(getattr(sess, "mcp_disabled_servers", None) or ())
+        )
+        if _delegated_credential:
+            mcp_disabled_servers = _stored_mcp_disabled
+        elif requested_mcp_disabled is None:
+            mcp_disabled_servers = _stored_mcp_disabled
+        else:
+            mcp_disabled_servers = sorted(set(requested_mcp_disabled))
+            if mcp_disabled_servers != _stored_mcp_disabled:
+                sess.mcp_disabled_servers = mcp_disabled_servers
+                _persist_session_mcp_servers(
+                    str(getattr(sess, "id", "") or ""), mcp_disabled_servers
+                )
 
         _global_disabled = get_setting("disabled_tools", [])
         if _global_disabled and isinstance(_global_disabled, list):
@@ -4772,6 +4834,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         access_level=run_access_level,
+                        disabled_mcp_servers=mcp_disabled_servers,
                         workspace=workspace or None,
                         relevant_tools=(
                             set(pending_tool_approval.selected_tools)

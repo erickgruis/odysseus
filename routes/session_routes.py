@@ -23,6 +23,63 @@ from src.auth_helpers import (
 from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
 from src.upload_handler import reserve_message_upload_references
+
+
+def _parse_mcp_disabled_servers(raw) -> list[str]:
+    """Decode the per-chat MCP opt-out list stored as JSON text."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(value, (list, tuple)):
+        return []
+    return sorted({str(item).strip() for item in value if str(item).strip()})
+
+
+def _mcp_server_catalog(db=None) -> list[dict]:
+    """MCP servers whose tools can appear in a chat's tool schema.
+
+    Built-in servers (browser, email) live only in the manager, while
+    user-added servers also have a row with the display name, so both are
+    merged here.
+    """
+    from core.database import McpServer
+    from src import tool_utils
+
+    manager = tool_utils.get_mcp_manager()
+    if manager is None:
+        return []
+    db_names: dict[str, str] = {}
+    db_disabled: set[str] = set()
+    if db is not None:
+        for srv in db.query(McpServer).all():
+            db_names[srv.id] = srv.name
+            if srv.is_enabled is False:
+                db_disabled.add(srv.id)
+    counts: dict[str, int] = {}
+    labels: dict[str, str] = {}
+    for tool in manager.get_all_tools():
+        server_id = tool.get("server_id")
+        if not server_id:
+            continue
+        # Builtin Python servers use the legacy code-block transport and never
+        # enter the function schema, so toggling them would do nothing.
+        if manager.is_builtin(server_id) and server_id not in {"builtin_browser", "email"}:
+            continue
+        counts[server_id] = counts.get(server_id, 0) + 1
+        labels.setdefault(server_id, str(tool.get("server_name") or server_id))
+    servers = []
+    for server_id, count in counts.items():
+        if count <= 0 or server_id in db_disabled:
+            continue
+        servers.append({
+            "id": server_id,
+            "name": db_names.get(server_id) or labels.get(server_id) or server_id,
+            "tool_count": count,
+        })
+    return sorted(servers, key=lambda item: item["name"].lower())
 from src.tool_approval_scopes import sanitize_client_message_metadata
 
 
@@ -1346,6 +1403,65 @@ def setup_session_routes(
             "requested": requested,
             "clamped": resolved != requested,
         }
+
+    @router.get("/session/{session_id}/mcp-servers")
+    def get_session_mcp_servers(request: Request, session_id: str):
+        """List MCP servers available to this chat and its opt-out set."""
+        _verify_session_owner(request, session_id)
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row is None:
+                raise HTTPException(404, f"Session {session_id} not found")
+            stored = _parse_mcp_disabled_servers(row.mcp_disabled_servers)
+            servers = _mcp_server_catalog(db)
+        finally:
+            db.close()
+        return {"servers": servers, "disabled": stored}
+
+    @router.post("/session/{session_id}/mcp-servers")
+    async def set_session_mcp_servers(
+        request: Request, session_id: str, disabled: str = Form("[]")
+    ):
+        """Persist the per-chat MCP opt-out list.
+
+        The client sends server ids to *hide* for this chat. Unknown ids are
+        dropped, so a page cannot probe the server table, and the list only
+        ever narrows the tools this chat is offered.
+        """
+        _verify_session_owner(request, session_id)
+        try:
+            requested = json.loads(disabled) if disabled else []
+        except (TypeError, ValueError):
+            raise HTTPException(400, "disabled must be a JSON array of server ids")
+        if not isinstance(requested, list):
+            raise HTTPException(400, "disabled must be a JSON array of server ids")
+
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id).first()
+            if row is None:
+                raise HTTPException(404, f"Session {session_id} not found")
+            known = {server["id"] for server in _mcp_server_catalog(db)}
+            resolved = sorted({str(item).strip() for item in requested
+                               if str(item).strip() in known})
+            row.mcp_disabled_servers = json.dumps(resolved)
+            row.updated_at = utcnow_naive()
+            db.commit()
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating MCP servers for session {session_id}: {e}")
+            raise HTTPException(500, "Failed to update session MCP servers")
+        finally:
+            db.close()
+
+        live = session_manager.sessions.get(session_id)
+        if live is not None:
+            live.mcp_disabled_servers = resolved
+        return {"status": "success", "disabled": resolved}
 
     @router.post("/session/{session_id}/compact")
     async def compact_session(request: Request, session_id: str):

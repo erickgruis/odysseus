@@ -10,7 +10,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js?v=20260908personaname1';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=20261030approvalfix4';
+import chatModule from './js/chat.js?v=20261030mcpaccess2';
 import compareModule from './js/compare/index.js?v=20260909mobilepaneaddscroll1';
 import documentModule from './js/document.js?v=20260916docctx2';
 import searchChatModule from './js/search-chat.js';
@@ -29,6 +29,7 @@ import chatRenderer from './js/chatRenderer.js?v=20260914metricssummary1';
 // through another session.
 import sessionModule from './js/sessions.js';
 import * as toolAccessModule from './js/toolAccess.js?v=20261027toolaccess1';
+import * as mcpAccessModule from './js/mcpAccess.js?v=20261030mcpaccess2';
 import { startBackgroundToolJobs } from './js/backgroundToolJobs.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -3799,6 +3800,8 @@ function startOdysseusApp() {
   searchModule.init();
   // Interactive tool access pill. Failure here must not block chat startup.
   try { void toolAccessModule.initToolAccess(); } catch (e) { console.warn('Tool access init failed', e); }
+  // Per-chat MCP server picker. Also non-critical.
+  try { void mcpAccessModule.initMcpAccess(); } catch (e) { console.warn('MCP access init failed', e); }
   chatModule.init(API_BASE);
   chatModule.initListeners();
   startBackgroundToolJobs({ getSessionId: () => sessionModule.getCurrentSessionId(),

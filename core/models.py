@@ -5,7 +5,7 @@ Pure data models — no database logic, no side effects.
 These are simple datacontainers. All persistence is handled by SessionManager.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 
 from src.tool_approval_scopes import (
@@ -131,6 +131,8 @@ class Session:
     endpoint_id: Optional[str] = None
     # Interactive tool access level; see src.tool_access.
     access_level: str = "ask"
+    # MCP servers this chat opts out of (their tools are not offered).
+    mcp_disabled_servers: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.headers is None:

@@ -39,6 +39,7 @@ import { createTerminalStreamError, isRecoverableStreamError } from './chatStrea
 import { loadPanel } from './panels.js?v=20260909movepicklayer1';
 import { invalidateSettings } from './appConfig.js';
 import { currentAccessLevel } from './toolAccess.js?v=20261027toolaccess1';
+import { disabledServers as disabledMcpServers } from './mcpAccess.js?v=20261030mcpaccess2';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -2935,6 +2936,10 @@ import { currentAccessLevel } from './toolAccess.js?v=20261027toolaccess1';
 	      // The server stores this on the session and enforces it per tool
 	      // call; the pill is only a selector.
 	      fd.append('access_level', currentAccessLevel());
+	      // Per-chat MCP opt-out; the route persists it with the session.
+	      try {
+	        fd.append('mcp_disabled_servers', JSON.stringify(disabledMcpServers()));
+	      } catch (e) { /* the picker is optional */ }
 	      if (!isPlanMode && _pendingApprovedPlan) {
 	        fd.append('approved_plan', _pendingApprovedPlan.slice(0, 8192));
 	        _pendingApprovedPlan = '';

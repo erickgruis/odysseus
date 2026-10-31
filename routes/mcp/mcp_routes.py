@@ -391,6 +391,18 @@ def setup_mcp_routes(mcp_manager: McpManager):
         finally:
             db.close()
 
+    @router.get("/chat-servers")
+    def list_chat_servers(request: Request):
+        """MCP servers the per-chat picker can offer.
+
+        Returns only id/name/tool count — no command, URL, env or auth data —
+        so the composer can render the picker without exposing server config.
+        """
+        require_admin(request)
+        from routes.session_routes import _mcp_server_catalog
+
+        return {"servers": _mcp_server_catalog()}
+
     @router.get("/tools")
     def list_tools(request: Request):
         """List all discovered MCP tools across all connected servers."""

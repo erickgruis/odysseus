@@ -8090,6 +8090,140 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
 }
 /* Read Only removes shell/write tools from the request; dim the shell toggle
    so it does not advertise an action the level refuses. */
+/* ── Per-chat MCP server picker (composer) ───────────────────────────────
+   A tool-selection control only: unchecked servers are removed from the
+   request schema. The access level still decides whether a call may run. */
+.mcp-access-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.mcp-access-wrap.hidden {
+  display: none;
+}
+.mcp-access-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.mcp-access-btn:hover,
+.mcp-access-btn:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  outline: none;
+}
+.mcp-access-btn.is-partial {
+  color: var(--accent, var(--red));
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 38%, transparent);
+}
+.mcp-access-btn.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.mcp-access-count {
+  font-variant-numeric: tabular-nums;
+}
+.mcp-access-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 260;
+  width: 252px;
+  max-width: min(252px, calc(100vw - 32px));
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+.mcp-access-menu.hidden {
+  display: none;
+}
+.mcp-access-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 6px;
+}
+.mcp-access-title {
+  margin-right: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+.mcp-access-head-btn {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.mcp-access-head-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.mcp-access-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mcp-access-option:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.mcp-access-option input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent, var(--red));
+}
+.mcp-access-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-access-option-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: color-mix(in srgb, var(--fg) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.mcp-access-hint {
+  margin-top: 6px;
+  padding: 8px 8px 3px;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--fg) 46%, transparent);
+}
+body.tool-access-read-only #mcp-access-btn {
+  opacity: 0.35;
+}
+
 body.tool-access-read-only #bash-toggle-btn {
   opacity: 0.35;
 }

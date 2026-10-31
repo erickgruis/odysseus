@@ -181,6 +181,22 @@ def widen_authority_for_level(
             ]
         except Exception:  # pragma: no cover - defensive import guard
             names = []
+        # MCP tools are namespaced (mcp__<server>__<tool>) and no built-in
+        # family contains them, so without this they stay denied no matter
+        # which level the user picked. Per-chat opt-outs are applied later by
+        # RequestAuthority.restrict, so a disabled server still cannot run.
+        try:
+            from src.tool_utils import get_mcp_manager
+
+            manager = get_mcp_manager()
+            if manager is not None:
+                names.extend(
+                    tool.get("qualified_name")
+                    for tool in manager.get_all_tools()
+                    if tool.get("qualified_name")
+                )
+        except Exception:  # pragma: no cover - defensive import guard
+            pass
 
     granted = []
     seen = set()
