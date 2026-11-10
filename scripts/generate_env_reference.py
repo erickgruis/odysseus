@@ -486,11 +486,37 @@ VARIABLE_NOTES: dict[str, tuple[str, str, str]] = {
     ),
 
     # -- Agent loop and tool execution -------------------------------------
+    "ODYSSEUS_TMUX_CWD": (
+        "Agent loop and tool execution", USER,
+        "Optional working directory for new Cookbook tmux sessions. Defaults to "
+        "the app root, then the home directory. tmux reuses the server's own cwd "
+        "for new panes, so this lets an operator point sessions at a stable path "
+        "when the install directory may be replaced.",
+    ),
     "ODYSSEUS_TOOL_APPROVAL_GATE": (
         "Agent loop and tool execution", USER,
         "Security-relevant. On by default: after external content enters a run, "
         "tools that execute code, mutate state or cause external side effects need "
         "a separate approval. Set to 0 to opt out.",
+    ),
+    "ODYSSEUS_LOCAL_MCP_READ_TOOLS": (
+        "Agent loop and tool execution", USER,
+        "Security-relevant. Comma-separated exact MCP read-tool names "
+        "on configured stdio MCP servers. Only stdio servers qualify. "
+        "Declarations do not override built-in tool effects. Output remains "
+        "untrusted to prevent privilege escalation, but allows continuation to "
+        "declared write tools on the same stdio server without external taint. "
+        "Stdio transport does not guarantee network isolation. Automatic "
+        "same-store writes carry residual prompt-injection risk.",
+    ),
+    "ODYSSEUS_LOCAL_MCP_WRITE_TOOLS": (
+        "Agent loop and tool execution", USER,
+        "Security-relevant. Comma-separated exact MCP write-tool names "
+        "on configured stdio MCP servers. Only stdio servers qualify. "
+        "Declarations do not override built-in tool effects. Allowed to execute "
+        "after declared local reads on the same stdio server, but blocked once "
+        "external untrusted context enters the run. Authorization must still "
+        "originate from the trusted request grant.",
     ),
     "ODYSSEUS_MCP_ALLOWED_COMMANDS": (
         "Agent loop and tool execution", USER,

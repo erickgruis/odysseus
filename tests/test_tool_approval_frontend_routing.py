@@ -8,16 +8,18 @@ def test_tool_approval_bypasses_polymorphic_send_button_actions():
     chat = (root / "static/js/chat.js").read_text(encoding="utf-8")
     stream = (root / "static/js/chatStream.js").read_text(encoding="utf-8")
 
-    # chat.js still defers the sealed approval through a synthetic button click.
-    assert "if (sendButton) sendButton.click();" in chat
+    # The sealed approval is submitted through the send path directly. The
+    # polymorphic .send-btn must not be clicked: with an empty composer it
+    # means New chat (or Record voice), so the approval would never reach the
+    # server.
+    assert "handleChatSubmit({ preventDefault() {} })" in chat
+    assert "sendButton.click()" not in chat
+    assert "document.getElementById('chat-form').requestSubmit()" not in chat
 
-    # The capture listener must intercept only that synthetic click and route it
-    # through the chat form submit path, before app.js can reinterpret an empty
-    # composer as New chat or Record voice.
-    assert "if (event.isTrusted) return;" in stream
-    assert "event.stopImmediatePropagation();" in stream
-    assert "chatForm.requestSubmit()" in stream
-    assert "sendButton.dataset.mode = ''" not in stream
+    # The old synthetic-click interceptor is gone; requestSubmit() alone never
+    # reaches handleChatSubmit because #chat-form has no submit listener.
+    assert "interceptApprovalClick" not in stream
+    assert "odysseus:tool-approval" not in stream
 
 
 def test_ask_user_card_has_no_close_button_and_chat_scale_text():
