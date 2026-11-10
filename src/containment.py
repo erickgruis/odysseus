@@ -859,6 +859,16 @@ def _bwrap_prefix(spec: ContainmentSpec) -> list[str]:
         "--dir", "/etc", "--ro-bind", "/etc", "/etc",
         "--dir", "/tmp", "--tmpfs", "/tmp",
         "--dev", "/dev", "--proc", "/proc",
+        # Linux exposes block-device topology, CPU topology and driver state
+        # under sysfs. Without it, ordinary read-only inventory commands
+        # (`lsblk`, `lscpu`, `nvidia-smi`) abort with "failed to access
+        # sysfs directory". Read-only is deliberate: the sandbox must not be
+        # able to change host kernel state.
+        *(
+            ("--dir", "/sys", "--ro-bind", "/sys", "/sys")
+            if os.path.isdir("/sys")
+            else ()
+        ),
     ]
     mounted: tuple[str, ...] = ()
     for flag, paths in (("--ro-bind", spec.readonly_extra), ("--bind", spec.writable_extra)):

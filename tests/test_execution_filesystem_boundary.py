@@ -306,3 +306,28 @@ def test_isolated_tmp_degrades_instead_of_raising_on_an_unwritable_workspace(
     monkeypatch.setattr(os, "makedirs", _refuse)
     path = subprocess_tools._isolated_tmp_dir(workspace)
     assert path == os.path.join(workspace, ".tmp")
+
+
+# ── sysfs: read-only hardware inventory ────────────────────────────────────
+@pytest.mark.skipif(os.name == "nt", reason="bwrap argv is POSIX-only")
+def test_sysfs_is_bound_read_only(workspace):
+    """`lsblk`/`lscpu` read /sys; give them a read-only view, never a writable one."""
+    argv = _argv(workspace)
+    if not os.path.isdir("/sys"):
+        pytest.skip("host has no sysfs")
+    assert _bind_mode(argv, "/sys") == "--ro-bind"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="bwrap argv is POSIX-only")
+def test_lsblk_succeeds_inside_the_namespace(workspace):
+    import shutil as _shutil
+    import subprocess
+
+    if not _shutil.which("bwrap") or not _shutil.which("lsblk"):
+        pytest.skip("bubblewrap or lsblk unavailable")
+    if not containment._bwrap_available():
+        pytest.skip("bubblewrap cannot create namespaces on this host")
+
+    spec = containment.ContainmentSpec(workspace, dict(os.environ), 30, required=frozenset())
+    argv = containment._bwrap_prefix(spec) + ["/bin/bash", "-lc", "lsblk >/dev/null"]
+    subprocess.run(argv, check=True, timeout=30)
