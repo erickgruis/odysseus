@@ -38,7 +38,7 @@ import {
 import { createTerminalStreamError, isRecoverableStreamError } from './chatStreamErrors.js';
 import { loadPanel } from './panels.js?v=20260909movepicklayer1';
 import { invalidateSettings } from './appConfig.js';
-import { currentAccessLevel } from './toolAccess.js?v=20261027toolaccess1';
+import { currentAccessLevel } from './toolAccess.js?v=20261110toolaccess3';
 import { disabledServers as disabledMcpServers } from './mcpAccess.js?v=20261030mcpaccess2';
 
   const RESEARCH_TIMEOUT_MS = 360000;

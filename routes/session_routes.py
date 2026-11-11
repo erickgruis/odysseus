@@ -448,23 +448,45 @@ def setup_session_routes(
         The menu copy lives on the server so the UI and the enforcement table
         cannot drift apart. ``admin`` says whether this caller may select Full
         Access; non-admins are clamped server-side regardless.
+
+        ``approval_override`` mirrors the global Tool approval setting: when it
+        is on, the composer shows Ask and Auto disabled and uses Full Access as
+        the effective default. ``stored_default`` is the saved preference, kept
+        for callers that need to show what the admin selected independently of
+        the override.
         """
         from src.settings import get_setting
         from src.tool_access import (
             DEFAULT_LEVEL,
             ORDER,
             PRESETS,
+            effective_default_level,
             normalize_access_level,
         )
         from src.tool_security import owner_is_admin_or_single_user
 
+        stored_default = (
+            normalize_access_level(get_setting("tool_access_default"))
+            or DEFAULT_LEVEL
+        )
+        # "Tool approval" is a server-wide override: when it is off, every run
+        # skips the approval card, so Ask and Auto have no effect. The composer
+        # still shows those levels but disables them, and the effective default
+        # for new chats is Full Access. Read Only stays Read Only because it is
+        # a restriction, not an approval prompt. This mirrors
+        # agent_loop._tool_approval_gate_bypassed exactly; the separate
+        # ODYSSEUS_TOOL_APPROVAL_GATE env var only governs the legacy gate.
+        approval_override = get_setting("tool_approval_mode", "ask") == "off"
+        effective_default = effective_default_level(
+            stored_default, approval_override=approval_override
+        )
+
         return {
             "presets": [dict(preset) for preset in PRESETS],
             "levels": list(ORDER),
-            "default": (
-                normalize_access_level(get_setting("tool_access_default"))
-                or DEFAULT_LEVEL
-            ),
+            "default": effective_default,
+            "stored_default": stored_default,
+            "approval_override": approval_override,
             "admin": owner_is_admin_or_single_user(effective_user(request)),
             "delegated": is_delegated_credential(request),
         }

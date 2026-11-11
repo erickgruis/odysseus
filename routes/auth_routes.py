@@ -231,6 +231,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        # Auth-disabled deployments are single-user admin by definition: the
+        # API layer already treats every request as admin (see
+        # _require_admin_user). Report the same identity here, otherwise the
+        # frontend hides every admin-only control behind a login that cannot
+        # exist in this mode.
+        if _auth_disabled():
+            # Only raise the admin flag. Setting a synthetic username here
+            # would attach DEFAULT_PRIVILEGES to it (can_use_bash is false),
+            # and the frontend would then hide the shell toggle.
+            result["is_admin"] = True
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored

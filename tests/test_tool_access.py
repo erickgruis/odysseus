@@ -25,6 +25,7 @@ from src.tool_access import (
     clamp_access_level,
     disable_mcp_for,
     disabled_tools_for,
+    effective_default_level,
     normalize_access_level,
     requires_approval,
 )
@@ -56,6 +57,19 @@ def test_non_admin_and_delegated_callers_cannot_select_full_access():
     )
     # Lower levels pass through for everyone.
     assert clamp_access_level(READ_ONLY, admin=False, delegated=True) == READ_ONLY
+
+
+def test_global_tool_approval_override_makes_ask_and_auto_defaults_full_access():
+    # The global override removes the prompt Ask and Auto exist for, so those
+    # stored defaults behave as Full Access. Read Only is a restriction and
+    # keeps its stored value.
+    assert effective_default_level(ASK, approval_override=False) == ASK
+    assert effective_default_level(AUTO, approval_override=False) == AUTO
+    assert effective_default_level(ASK, approval_override=True) == FULL_ACCESS
+    assert effective_default_level(AUTO, approval_override=True) == FULL_ACCESS
+    assert effective_default_level(FULL_ACCESS, approval_override=True) == FULL_ACCESS
+    assert effective_default_level(READ_ONLY, approval_override=True) == READ_ONLY
+    assert effective_default_level(None, approval_override=True) == FULL_ACCESS
 
 
 def test_delegated_runs_keep_the_legacy_gate_instead_of_an_unanswerable_card():

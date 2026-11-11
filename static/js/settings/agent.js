@@ -64,6 +64,9 @@ export async function initAgentSettings() {
     }
     try {
       await _postSettings(payload);
+      // The composer caches /api/tool-access metadata; tell it to re-read the
+      // global override and the new-chat default without a page reload.
+      window.dispatchEvent(new CustomEvent('odysseus:tool-access-changed'));
       msg.textContent = (tools > 0 ? 'Limit: ' + tools + ' tool calls' : 'Unlimited tool calls') +
         (rounds != null ? ' · ' + rounds + ' steps/message' : '') +
         (supInput && supInput.checked ? ' · supervisor on' : '');

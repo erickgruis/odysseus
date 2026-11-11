@@ -10,7 +10,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js?v=20260908personaname1';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=20261110merge1';
+import chatModule from './js/chat.js?v=20261110yolo2';
 import compareModule from './js/compare/index.js?v=20260909mobilepaneaddscroll1';
 import documentModule from './js/document.js?v=20260916docctx2';
 import searchChatModule from './js/search-chat.js';
@@ -28,7 +28,7 @@ import chatRenderer from './js/chatRenderer.js?v=20260914metricssummary1';
 // current-session state, so the picker can display one model while chat sends
 // through another session.
 import sessionModule from './js/sessions.js';
-import * as toolAccessModule from './js/toolAccess.js?v=20261027toolaccess1';
+import * as toolAccessModule from './js/toolAccess.js?v=20261110toolaccess3';
 import * as mcpAccessModule from './js/mcpAccess.js?v=20261030mcpaccess2';
 import { startBackgroundToolJobs } from './js/backgroundToolJobs.js';
 import memoryModule from './js/memory.js';
@@ -1356,6 +1356,11 @@ function initializeEventListeners() {
     .then(r => r.json())
     .then(d => {
       window._isAdmin = !!d.is_admin;
+      // The settings shell applies admin-only visibility when it opens, which
+      // can happen before this fetch settles. Re-apply it now so a quick
+      // open right after load does not stay stuck with the Admin section
+      // hidden.
+      try { settingsModule.syncAdminVisibility?.(); } catch (e) {}
       if (d.is_admin && userBarAdmin) userBarAdmin.style.display = '';
       const userBarName = el('user-bar-name');
       const userBarAvatar = el('user-bar-avatar');

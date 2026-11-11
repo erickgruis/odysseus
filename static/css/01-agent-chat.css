@@ -8095,6 +8095,11 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
   line-height: 1.45;
   color: color-mix(in srgb, var(--fg) 46%, transparent);
 }
+.access-level-hint.is-override {
+  margin-top: 2px;
+  border-top-color: color-mix(in srgb, var(--red) 30%, transparent);
+  color: var(--red);
+}
 /* Read Only removes shell/write tools from the request; dim the shell toggle
    so it does not advertise an action the level refuses. */
 /* ── Per-chat MCP server picker (composer) ───────────────────────────────

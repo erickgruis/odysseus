@@ -119,6 +119,22 @@ def clamp_access_level(
     return level
 
 
+def effective_default_level(
+    stored_default: object, *, approval_override: bool
+) -> str:
+    """The default level new chats actually start at.
+
+    The global Tool approval override removes the prompt that Ask and Auto
+    rely on, so those stored defaults behave as Full Access. Read Only is a
+    restriction, not a prompt, and keeps its stored value.
+    """
+
+    resolved = normalize_access_level(stored_default) or DEFAULT_LEVEL
+    if approval_override and resolved != READ_ONLY:
+        return FULL_ACCESS
+    return resolved
+
+
 def enforced_level(value: object, *, delegated: bool) -> Optional[str]:
     """The level a run actually enforces, or None for the legacy gate.
 
