@@ -60,6 +60,7 @@ let _level = 'ask';
 let _defaultLevel = 'ask';
 let _admin = true;
 let _delegated = false;
+let _yolo = false;
 let _ready = false;
 let _menuOpen = false;
 let _sessionId = null;
@@ -92,8 +93,31 @@ export function currentAccessLevel() {
   return normalizeLevel(_level) || _defaultLevel;
 }
 
+/**
+ * What the composer shows. Under the global override an existing Ask/Auto
+ * chat displays Full Access without rewriting its stored level, so turning
+ * the override off restores the chat's own choice.
+ */
+function displayLevel() {
+  return effectiveLevel(normalizeLevel(_level) || _defaultLevel);
+}
+
+/**
+ * The global Tool approval override (YOLO) makes every run skip the approval
+ * card, so Ask and Auto have no effect. Treat them as Full Access instead of
+ * showing a level that lies about what the server will do. Read Only stays
+ * Read Only because it is a restriction, not a prompt.
+ */
+function effectiveLevel(level) {
+  const normalized = normalizeLevel(level);
+  if (!normalized) return '';
+  if (_yolo && (normalized === 'ask' || normalized === 'auto')) return 'full_access';
+  return normalized;
+}
+
 function canSelect(level) {
   if (level === 'full_access' && (!_admin || _delegated)) return false;
+  if (_yolo && (level === 'ask' || level === 'auto')) return false;
   return true;
 }
 
@@ -101,8 +125,8 @@ function renderButton() {
   const button = el('access-level-btn');
   const label = el('access-level-label');
   const icon = el('access-level-icon');
-  const preset = presetFor(currentAccessLevel());
-  const level = currentAccessLevel();
+  const preset = presetFor(displayLevel());
+  const level = displayLevel();
   if (label) label.textContent = preset ? preset.label : 'Ask';
   if (icon && LEVEL_ICONS[level]) icon.innerHTML = LEVEL_ICONS[level];
   if (button) {
@@ -122,7 +146,7 @@ function renderMenu() {
   if (!menu) return;
   menu.innerHTML = '';
   _presets.forEach((preset) => {
-    const selected = preset.id === currentAccessLevel();
+    const selected = preset.id === displayLevel();
     const disabled = !canSelect(preset.id);
     const option = document.createElement('button');
     option.type = 'button';
@@ -135,7 +159,9 @@ function renderMenu() {
     if (disabled) {
       option.classList.add('is-disabled');
       option.disabled = true;
-      option.title = 'Admins and interactive sessions only.';
+      option.title = _yolo && (preset.id === 'ask' || preset.id === 'auto')
+        ? 'Disabled by the global Tool approval override.'
+        : 'Admins and interactive sessions only.';
     }
     const icon = LEVEL_ICONS[preset.id] || '';
     option.innerHTML = [
@@ -162,7 +188,16 @@ function renderMenu() {
   hint.className = 'access-level-hint';
   hint.id = 'access-level-hint';
   menu.appendChild(hint);
-  updateHint(presetFor(currentAccessLevel()));
+  updateHint(presetFor(displayLevel()));
+
+  if (_yolo) {
+    const override = document.createElement('div');
+    override.className = 'access-level-hint is-override';
+    override.id = 'access-level-override-hint';
+    override.textContent =
+      'Global Tool approval override is on — Ask and Auto are unavailable.';
+    menu.appendChild(override);
+  }
 }
 
 function updateHint(preset) {
@@ -303,7 +338,8 @@ async function loadMetadata() {
         risk: !!preset.risk,
       }));
     }
-    _defaultLevel = normalizeLevel(data.default) || _defaultLevel;
+    _yolo = !!data.approval_override;
+    _defaultLevel = effectiveLevel(normalizeLevel(data.default)) || _defaultLevel;
     _admin = data.admin !== false;
     _delegated = !!data.delegated;
   } catch (_) {
@@ -344,6 +380,25 @@ export async function initToolAccess() {
   window.addEventListener('odysseus:session-changed', (event) => {
     _sessionId = (event && event.detail && event.detail.sessionId) || null;
     void refreshForSession(_sessionId);
+  });
+
+  // The settings panel changes the global override without reloading the
+  // composer. Re-read the metadata so the menu reflects it immediately.
+  window.addEventListener('odysseus:tool-access-changed', () => {
+    void (async () => {
+      const previousDefault = _defaultLevel;
+      await loadMetadata();
+      // A new chat still sitting on the old default follows the new default.
+      // An existing chat keeps its stored level; the override only changes
+      // how that level is displayed and enforced for this run.
+      const sid = _sessionId || currentSessionId();
+      if (!sid && _level === previousDefault) {
+        _level = _defaultLevel;
+        _sessionCache.set(null, _level);
+      }
+      renderButton();
+      if (_menuOpen) renderMenu();
+    })();
   });
 
   await loadMetadata();
