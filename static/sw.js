@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v1143-yolo-override-appjs6';
+const CACHE_NAME = 'odysseus-v1149-fullwidth-input-12px';
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -44,7 +44,7 @@ const PRECACHE = [
   '/static/css/00-tokens.css?v=20261110merge1',
   '/static/css/01-agent-chat.css?v=20261110merge2',
   '/static/css/02-compare.css?v=20261110merge1',
-  '/static/css/03-agent-chat.css?v=20261110merge1',
+  '/static/css/03-agent-chat.css?v=20261110fullwidth6',
   '/static/css/04-memory.css?v=20261110merge1',
   '/static/css/05-documents.css?v=20261110merge1',
   '/static/css/06-admin-settings.css?v=20261110merge1',

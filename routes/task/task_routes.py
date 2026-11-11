@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core.database import SessionLocal, ScheduledTask, TaskRun, NotificationLog
 from core.constants import internal_api_base
-from src.auth_helpers import get_current_user
+from src.auth_helpers import storage_owner_for_request
 from src.constants import DATA_DIR, EMAIL_URGENCY_CACHE_DIR
 from src.endpoint_resolver import resolve_owner_registered_endpoint_url
 from src.task_action_policy import (
@@ -308,7 +308,12 @@ def setup_task_routes(task_scheduler) -> APIRouter:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
     def _owner(request: Request):
-        return get_current_user(request)
+        # Resolve the storage owner so auth-disabled single-user mode gets a
+        # stable local bucket instead of an empty owner. Returning None made
+        # every POST /api/tasks/notification-logs 401, and the front-end fetch
+        # wrapper then redirected to /login — reloading a fresh chat and
+        # discarding the access-level change the toast was reporting.
+        return storage_owner_for_request(request)
 
     async def _generate_task_name(prompt: str, owner: Optional[str] = None) -> str:
         """Use LLM to generate a short task name from the prompt."""

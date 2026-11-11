@@ -993,8 +993,38 @@ body.hide-thinking .thinking-section { display: none !important; }
 
 /* Widen chat area via settings toggle */
 body.fullwidth-chat .chat-history {
-  padding-left: 0 !important;
+  padding-left: 12px !important;
   padding-right: 12px !important;
+}
+
+/* Keep the message-bubble gutters at 12px in full-width mode. */
+body.fullwidth-chat .msg-ai {
+  margin-left: 12px;
+}
+
+body.fullwidth-chat .msg-user {
+  margin-right: 12px;
+}
+
+/* The composer must match the widened chat history. The base rule centres
+   the bar at 800px; full-width mode drops that cap. The history has a 12px
+   gutter and each bubble adds a 12px margin, so the bubble row starts and
+   ends 24px from the container edge. The composer uses the same 24px so its
+   visible 12px margin inside the history track lines up with the bubbles. */
+body.fullwidth-chat .chat-input-bar {
+  max-width: none;
+  margin-left: 24px;
+  margin-right: 24px;
+  width: calc(100% - 48px);
+}
+
+/* The welcome screen has a more specific centred rule; keep it centred
+   vertically but let the bar span the same row as the bubbles. */
+body.fullwidth-chat .chat-container.welcome-active .chat-input-bar {
+  max-width: none;
+  margin-left: 24px;
+  margin-right: 24px;
+  width: calc(100% - 48px);
 }
 
 /* Thinking process styles — colors follow theme accent */
