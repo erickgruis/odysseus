@@ -77,6 +77,14 @@ The unit binds to `127.0.0.1:7011`. Edit `--port` in `~/.config/systemd/user/ody
 
 If the repo lives somewhere other than `~/odysseus`, run `./install-service.sh` instead of copying the unit by hand — it rewrites the `%h/odysseus` paths to the checkout location.
 
+Web search needs SearXNG. To keep the app native and run only SearXNG in Docker:
+
+```bash
+docker compose up -d searxng
+```
+
+It binds `127.0.0.1:8080`, which matches the default `SEARXNG_INSTANCE`. Port, image pin, secret, and update notes are in [Optional: SearXNG via Docker](website/setup.md#optional-searxng-via-docker).
+
 Docker, Windows, macOS, HTTPS, and advanced configuration live in the [setup guide](website/setup.md).
 
 ## Features

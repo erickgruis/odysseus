@@ -125,6 +125,84 @@ taken, set `APP_PORT=7001` in `.env` and recreate the container. Set
 > Cookbook serves local models on CPU only. For GPU-accelerated model serving,
 > run natively instead — see [Apple Silicon](#apple-silicon) below.
 
+#### Docker and shell containment
+
+The native install enforces agent shell containment with `bubblewrap`, which
+works unprivileged through user namespaces. The Docker image does not ship
+`bubblewrap`, and Docker's default seccomp profile blocks the namespace
+creation it needs. Agent shell commands inside the container therefore report
+`filesystem` and `process_tree` as unenforced and are refused under the shipped
+enforcing mode — even with `privileged: true`, because `bubblewrap` itself is
+missing.
+
+`privileged: true` is not the fix. It grants the full capability set and
+disables the default seccomp and AppArmor profiles for the whole container,
+turning any bug in the web app or a tool into host-level risk. If you need
+contained shell tools in Docker, install `bubblewrap` in the image and prefer
+the narrower `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` over
+`--privileged`; both make the `bubblewrap` probe succeed, while the default
+profile still fails. Both remain a significant security relaxation.
+
+For that reason this fork keeps the native systemd install as the recommended
+path and uses Docker only for separable services such as SearXNG.
+
+### Optional: SearXNG via Docker
+
+Web search needs a SearXNG instance, and the native install above does not start
+one. The repo ships a pinned, hardened Compose service for exactly this case:
+keep Odysseus native and run only SearXNG in Docker.
+
+From the repository root:
+
+```bash
+docker compose up -d searxng
+```
+
+That starts the pinned SearXNG container and nothing else. Verify it:
+
+```bash
+docker compose ps searxng
+docker compose logs -f searxng
+curl -fsS http://127.0.0.1:8080/ >/dev/null && echo "searxng ok"
+```
+
+For a native install, keep `SEARXNG_INSTANCE=http://127.0.0.1:8080` in `.env`
+(the Compose app container overrides this to `http://searxng:8080` for its own
+in-network access). Restart Odysseus after editing `.env`:
+
+```bash
+systemctl --user restart odysseus
+```
+
+The service binds `127.0.0.1:8080` by default. If that port is taken, set
+`SEARXNG_HOST_PORT=8081` in `.env`, recreate the container, and point
+`SEARXNG_INSTANCE` at the same port:
+
+```bash
+docker compose up -d --force-recreate searxng
+```
+
+Notes:
+
+- **Pinned image.** `docker-compose.yml` pins
+  `searxng/searxng:2026.10.24-ef0ec03da@sha256:…`. Upstream tags move, and a
+  broken one fails the healthcheck and blocks startup. To update, change the
+  pin deliberately, then run `docker compose pull searxng`.
+- **Healthcheck.** The container reports healthy only when it answers on
+  `http://localhost:8080/`; `docker compose ps` shows the state.
+- **Secret.** `SEARXNG_SECRET` is optional. When blank, the container generates
+  one on first boot and stores it in the `searxng-data` volume, so it survives
+  restarts. Set it explicitly only if you need to pin it across rebuilds.
+- **Capabilities.** The service drops all capabilities and adds back only
+  `CHOWN`, `SETGID`, `SETUID`, and `DAC_OVERRIDE`, which the upstream entrypoint
+  needs for first-boot ownership and privilege drop. It does not run
+  privileged.
+- **Data.** Settings live in the `searxng-data` volume, not in the checkout.
+  `docker compose down` keeps it; `docker compose down -v` deletes it.
+- **No full stack.** On a native install, do not run plain
+  `docker compose up -d`; that also starts the containerised app, ChromaDB, and
+  ntfy.
+
 ### Apple Silicon
 Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an
 M-series Mac, run Odysseus natively:
