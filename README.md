@@ -4,6 +4,18 @@
 
 <p align="center">
   A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
+
+  This repo is an OpenCode modified fork of the main project at odysseus-dev/odysseus.
+  The main changes are added various elevation levels of permission that can be set in the UI.
+  Two global defaults can be set under Settings -> Admin-Agent Tools.  
+   - Default access level (read only, ask, auto, full-access) for the UI menu located in the chat box
+   - Tool approval global override (always ask, YOLO).  
+      - YOLO gives full reign (use caution) and sets the access level to 'full-access'.  In this mode the chat box only offers (read only, full-access)
+
+  The broken permissions of the main branch are fixed here.  
+   - When in 'ask' or 'auto' mode, the agent will offer a pop up to allow/deny permission.  The 'allow' selection works in this build.
+   - When in 'read only' mode, the agent has no access to tools
+   - When in 'full access' mode, the agent has full system access and does not prompt for permission.
 </p>
 
 <p align="center">
@@ -25,7 +37,7 @@
 
 ## Quick Start (Linux, system install)
 
-> `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/odysseus-dev/odysseus/tree/main) if you want the more curated branch.
+> `dev` is the default branch.
 
 Requirements: Python 3.11+, `git`, and `tmux` (Cookbook uses tmux for background model downloads and serves). Node.js/npm is optional and only needed for the browser MCP tool.
 
