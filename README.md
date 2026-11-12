@@ -80,6 +80,7 @@ If the repo lives somewhere other than `~/odysseus`, run `./install-service.sh` 
 Web search needs SearXNG. To keep the app native and run only SearXNG in Docker:
 
 ```bash
+cd ~/odysseus
 docker compose up -d searxng
 ```
 
