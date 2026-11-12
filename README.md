@@ -6,7 +6,7 @@
   A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
 
   This repo is an OpenCode modified fork of the main project at odysseus-dev/odysseus.
-  The main changes are added various elevation levels of permission that can be set in the UI.
+  The main changes are fixes to the permissions and new UI elements to set various levels of safety.
   Two global defaults can be set under Settings -> Admin-Agent Tools.  
    - Default access level (read only, ask, auto, full-access) for the UI menu located in the chat box
    - Tool approval global override (always ask, YOLO).  
