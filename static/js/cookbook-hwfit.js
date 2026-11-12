@@ -2467,14 +2467,25 @@ export function _hwfitInit() {
         throw new Error(data.detail || data.error || `HTTP ${res.status}`);
       }
       const ms = Date.now() - t0;
-      const out = (data.stdout || '').trim();
-      if (data.exit_code === 0 && out.startsWith('ok')) {
+      // Remote login shells run ~/.bashrc for non-interactive SSH sessions too,
+      // so a fastfetch/neofetch banner or stray echo can precede the command's
+      // output. Accept the `ok` marker on any line; the exit code is the truth.
+      const lines = (data.stdout || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (data.exit_code === 0 && lines.includes('ok')) {
         dot.className = 'cookbook-srv-status ok';
         dot.title = `Reachable · ${ms} ms · use Dependencies to check tmux/HF setup`;
         setMsg(`Connected · ${ms} ms`, 'var(--green,#50fa7b)');
       } else {
         dot.className = 'cookbook-srv-status fail';
-        const err = (data.stderr || data.stdout || (data.exit_code == null ? 'no exit code' : `exit ${data.exit_code}`)).toString().trim().slice(0, 240);
+        // Prefer stderr, and never surface a wall of banner art as the reason.
+        const err = ((data.stderr || '').toString().trim()
+          || (data.exit_code === 0
+            ? (lines[lines.length - 1] || 'no output from remote shell')
+            : (data.exit_code == null ? 'no exit code' : `exit ${data.exit_code}`))
+        ).slice(0, 240);
         dot.title = `SSH failed: ${err}`;
         setMsg(`Failed · ${err}`, 'var(--red,#e06c75)');
       }

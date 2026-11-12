@@ -32,6 +32,8 @@ from routes.cookbook_helpers import (
     _validate_serve_model_id,
     _shell_path,
     run_ssh_command_async,
+    parse_remote_json,
+    last_nonempty_line,
 )
 
 
@@ -1060,3 +1062,37 @@ def test_dependency_recipe_run_sends_a_valid_pip_repo_id():
     src = (Path(__file__).resolve().parents[1] / "static" / "js" / "cookbook.js").read_text(encoding="utf-8")
     assert "repo_id: `${backend}-setup`," in src
     assert "repo_id: `${backend} setup`" not in src
+
+
+def test_parse_remote_json_skips_interactive_shell_banner():
+    # Bash sources ~/.bashrc for non-interactive SSH sessions, so a fastfetch
+    # banner can precede the payload (this is what broke Cookbook on Fedora).
+    banner = (
+        "             .',;::::;,'.   wendy@fedora\n"
+        "  OS: Fedora Linux 44 (Workstation Edition) x86_64\n"
+        " \x1b[40m   \x1b[41m   \x1b[m\n"
+        "\n"
+    )
+    payload = json.dumps([{"repo_id": "org/model", "size_bytes": 123, "nb_files": 1}])
+    assert parse_remote_json(banner + payload) == [
+        {"repo_id": "org/model", "size_bytes": 123, "nb_files": 1}
+    ]
+
+
+def test_parse_remote_json_decodes_embedded_value_without_trailing_newline():
+    assert parse_remote_json('banner text {"a": 1} trailing') == {"a": 1}
+
+
+def test_parse_remote_json_keeps_the_clean_fast_path():
+    assert parse_remote_json("  [1, 2, 3]\n") == [1, 2, 3]
+
+
+def test_parse_remote_json_raises_when_no_payload_is_present():
+    with pytest.raises(ValueError, match="no JSON value"):
+        parse_remote_json("just noise\nmore noise\n")
+
+
+def test_last_nonempty_line_skips_banner_and_blank_tail():
+    assert last_nonempty_line("art\n\nok\n\n") == "ok"
+    assert last_nonempty_line(b"art\ntermux\n") == "termux"
+    assert last_nonempty_line("") == ""

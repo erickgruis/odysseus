@@ -1667,3 +1667,66 @@ async def run_ssh_command_async(
         await proc.communicate()
         raise
     return proc.returncode or 0, stdout, stderr
+
+
+_JSON_LINE_START_RE = re.compile(r"(?m)^[ \t]*([\[{])")
+
+
+def last_nonempty_line(text: str | bytes) -> str:
+    """Return the last non-blank line of command output, ANSI noise included.
+
+    Remote login shells can prepend banner/MOTD text to stdout, so callers that
+    need a single token from a remote command (platform probe, `ok` marker)
+    should look at the final line instead of requiring a pristine stream.
+    """
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def parse_remote_json(text: str | bytes):
+    """Decode JSON printed by a command run over SSH.
+
+    Bash sources ``~/.bashrc`` for non-interactive remote (sshd) sessions, so a
+    host with a fastfetch/neofetch banner or any stray ``echo`` in a dotfile
+    prints noise on stdout before the command's own output. That is harmless
+    but makes a naive ``json.loads(stdout)`` fail with "Expecting value".
+
+    Fast path: the whole payload is JSON. Otherwise skip the preamble and decode
+    the first JSON value anchored at the start of a line, falling back to any
+    embedded ``{``/``[`` (for banners that did not end with a newline).
+
+    Raises ``ValueError`` when no JSON value can be decoded.
+    """
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    text = text or ""
+    try:
+        return json.loads(text.lstrip("\ufeff \t\r\n"))
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for match in _JSON_LINE_START_RE.finditer(text):
+        try:
+            value, _ = decoder.raw_decode(text, match.start(1))
+        except json.JSONDecodeError:
+            continue
+        return value
+
+    for idx, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            continue
+        return value
+
+    tail = last_nonempty_line(text)
+    raise ValueError(
+        "no JSON value in remote output" + (f": {tail[:200]}" if tail else "")
+    )

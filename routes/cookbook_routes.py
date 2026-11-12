@@ -60,6 +60,7 @@ from routes.cookbook_helpers import (
     _append_vllm_linux_preflight_lines, _ollama_bind_from_cmd, _pip_install_fallback_chain,
     _pip_install_no_cache, _user_shell_path_bootstrap, _venv_safe_local_pip_install_cmd,
     _diagnose_serve_output, run_ssh_command_async,
+    parse_remote_json, last_nonempty_line,
     _ollama_bind_from_cmd, _pip_install_fallback_chain, _pip_install_no_cache,
     _append_pip_install_runner_lines, _pip_install_command_without_break_system_packages,
     _normalize_llama_cpp_python_cache_types,
@@ -1380,7 +1381,7 @@ def setup_cookbook_routes() -> APIRouter:
 
         models = []
         try:
-            raw = json.loads(stdout_txt)
+            raw = parse_remote_json(stdout_txt)
             for m in raw:
                 size_gb = m["size_bytes"] / (1024 ** 3)
                 if size_gb >= 1:
@@ -2473,7 +2474,8 @@ def setup_cookbook_routes() -> APIRouter:
                 detect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-            out = stdout.decode().strip()
+            # A remote ~/.bashrc banner can prepend lines; the marker is last.
+            out = last_nonempty_line(stdout)
             if "Windows_NT" in out:
                 platform = "windows"
             else:
@@ -2483,7 +2485,7 @@ def setup_cookbook_routes() -> APIRouter:
                     detect_cmd2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
                 stdout2, _ = await asyncio.wait_for(proc2.communicate(), timeout=10)
-                platform = stdout2.decode().strip()
+                platform = last_nonempty_line(stdout2)
         except Exception:
             platform = "linux"
 
