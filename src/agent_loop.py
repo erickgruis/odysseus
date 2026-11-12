@@ -7126,7 +7126,8 @@ _DOMAIN_RULES = {
 ## File rules
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
-- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.
+- For remote shell work on a machine the user configured in Cookbook, use `ssh_exec` (it runs server-side with the Cookbook key). Do not try to reach `~/.ssh` from `bash`; the sandbox does not mount it. Use `bash` for local commands only.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -7153,7 +7154,7 @@ _DOMAIN_TOOL_MAP = {
     "skills": {"manage_skills"},
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
-    "files": {"bash", "python", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
+    "files": {"bash", "python", "ssh_exec", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
@@ -7164,6 +7165,7 @@ _PRIVATE_WEB_TOOL_NAMES = set(WEB_TOOL_NAMES) | {"private_browser", "youtube_too
 _COMPACT_AGENT_CORE_TOOLS = {
     "bash",
     "python",
+    "ssh_exec",
     "web_search",
     "web_fetch",
     "read_file",
@@ -7910,6 +7912,16 @@ pip install openai-whisper
 ```
 SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Odysseus UI — no need to copy files out.
 NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats real newlines and `\\n` arrives as literal backslash-n, which Python parses as a line-continuation error on line 1. To run multi-line code, either use the dedicated `python` tool block above, or save to a file first with a quoted HEREDOC (`cat > /tmp/x.py << 'EOF' ... EOF`) and then `python /tmp/x.py`.""",
+
+    "ssh_exec": """\
+```ssh_exec
+{"host": "wendy@192.168.0.209", "command": "uname -a && uptime"}
+```
+Run ONE shell command on a remote machine that is configured in Cookbook. `host` accepts the Cookbook server name (e.g. `Wendy`) or its configured `user@host`. The command runs through the remote login shell.
+- ssh runs in the Odysseus server process with the Cookbook SSH key. The `bash` sandbox cannot see `~/.ssh`, so use this tool for remote commands instead of trying `ssh` from bash.
+- Only Cookbook-configured servers are reachable. If the machine is missing, tell the user to add it in Cookbook; do not try another host spelling.
+- Do not use this to launch model servers — use `serve_model`/`serve_preset` so Cookbook can track them.
+- `timeout` defaults to 60s (max 300). For long remote jobs, launch them detached on the remote host (e.g. `tmux new-session -d`) and poll with a follow-up `ssh_exec`.""",
 
     "python": """\
 ```python
@@ -15234,6 +15246,7 @@ _ADMIN_TOOLS = {
     "send_to_session", "search_chats", "pipeline", "ask_teacher", "list_models",
     "list_cached_models", "list_downloads", "list_cookbook_servers",
     "list_serve_presets", "list_served_models", "tail_serve_output", "search_hf_models",
+    "ssh_exec",
 }
 
 def _build_base_prompt(

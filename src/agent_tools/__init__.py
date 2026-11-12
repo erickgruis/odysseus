@@ -35,6 +35,7 @@ from .admin_tools import (
     do_manage_endpoints, do_manage_mcp, do_manage_webhooks,
     do_manage_tokens, do_manage_settings,
 )
+from .ssh_tools import SshExecTool
 
 TOOL_HANDLERS = {
     "bash": BashTool().execute,
@@ -77,6 +78,9 @@ TOOL_HANDLERS = {
     "run_editor_command": RunEditorCommandTool().execute,
     "get_editor_screenshot": GetEditorScreenshotTool().execute,
     "ai_edit_image": AiEditImageTool().execute,
+    # Runs ssh in the server process with the Cookbook identity; the workspace
+    # sandbox cannot see ~/.ssh (see src/agent_tools/ssh_tools.py).
+    "ssh_exec": SshExecTool().execute,
 }
 # Config/integration admin tools (manage_endpoints/mcp/webhooks/tokens/settings).
 TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)

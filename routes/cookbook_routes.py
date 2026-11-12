@@ -675,17 +675,18 @@ def setup_cookbook_routes() -> APIRouter:
         return shlex.join(env_parts + body)
 
     def _cookbook_ssh_dir() -> Path:
+        # Shared with the agent's ssh_exec tool so both resolve one identity.
         # The Docker image keeps cookbook keys under /app/.ssh; that path only
         # exists inside the container. On Windows (and any non-container host)
         # fall back to the user profile's ~/.ssh, which OpenSSH on Win10+ uses.
-        if not IS_WINDOWS:
-            app_ssh = Path("/app/.ssh")
-            if Path("/app").exists():
-                return app_ssh
-        return Path.home() / ".ssh"
+        from src.cookbook_ssh import cookbook_ssh_dir
+
+        return cookbook_ssh_dir()
 
     def _cookbook_ssh_key_path() -> Path:
-        return _cookbook_ssh_dir() / "id_ed25519"
+        from src.cookbook_ssh import cookbook_ssh_key_path
+
+        return cookbook_ssh_key_path()
 
     def _ssh_known_host_name(host: str) -> str:
         """Return the host part OpenSSH stores in known_hosts.

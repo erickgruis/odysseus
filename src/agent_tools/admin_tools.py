@@ -746,8 +746,8 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
             # the denylist.
             from src.settings import get_setting, save_settings, load_settings
             _ALIASES = {
-                "shell": ["bash"],
-                "terminal": ["bash"],
+                "shell": ["bash", "ssh_exec"],
+                "terminal": ["bash", "ssh_exec"],
                 "search": ["web_search", "web_fetch"],
                 "web": ["web_search", "web_fetch"],
                 "browser": ["builtin_browser", "private_browser"],

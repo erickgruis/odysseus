@@ -43,6 +43,7 @@ _REQUIRED_NATIVE_TOOL_ARGS = {
     "apply_patch": ("patch_text", "patchText", "patch"),
     "generate_image": ("prompt",),
     "host_shell": ("command",),
+    "ssh_exec": ("host", "command"),
 }
 
 
@@ -322,6 +323,23 @@ FUNCTION_TOOL_SCHEMAS = [
                     "timeout": {"type": "integer", "description": "Optional timeout in seconds, capped by the bridge"}
                 },
                 "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ssh_exec",
+            "description": "Run one shell command on a remote machine over SSH using the Cookbook's SSH key. Use this for remote work on a machine the user configured in Cookbook (a Cookbook server name, or its configured user@host such as 'wendy@192.168.0.209'). The host must already exist in Cookbook; other destinations are refused. ssh runs server-side with the Cookbook identity, so it works even though the bash sandbox cannot see ~/.ssh. Do not use it for local commands (use bash) or to launch model servers (use serve_model).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Cookbook server name (e.g. 'Wendy') or its configured user@host (e.g. 'wendy@192.168.0.209')."},
+                    "command": {"type": "string", "description": "Remote shell command to run, e.g. 'uname -a && uptime'. Run through the remote login shell."},
+                    "timeout": {"type": "integer", "description": "Optional timeout in seconds (default 60, max 300)."},
+                    "ssh_port": {"type": "string", "description": "Optional SSH port override; defaults to the Cookbook server's configured port."}
+                },
+                "required": ["host", "command"]
             }
         }
     },

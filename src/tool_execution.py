@@ -1288,6 +1288,10 @@ _ADMIN_TOOLS = {
     "serve_preset",
     "stop_served_model",
     "cancel_download",
+    # Remote shell over the Cookbook SSH identity. Admin-only for the same
+    # reason as bash/python: it executes arbitrary commands, just on another
+    # machine.
+    "ssh_exec",
     # Read-only Cookbook tools reach require_admin routes over the internal
     # loopback without an owner check (see NON_ADMIN_BLOCKED_TOOLS in
     # src/tool_security.py), so they are admin-only at dispatch as well.

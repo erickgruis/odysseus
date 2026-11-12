@@ -151,6 +151,15 @@ _register(
     result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
 )
 _register(
+    {"ssh_exec"},
+    ToolEffect.EXECUTE_CODE,
+    ToolEffect.NETWORK_EGRESS,
+    ToolEffect.EXTERNAL_SIDE_EFFECT,
+    # Commands and their output live on another machine; treat every result as
+    # external data authored outside this backend.
+    result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
+)
+_register(
     {"apply_patch", "edit_file", "write_file"},
     ToolEffect.WRITE_WORKSPACE,
     # Successful writes include unified diffs that can echo arbitrary existing

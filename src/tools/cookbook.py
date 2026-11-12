@@ -239,6 +239,8 @@ async def _cookbook_servers() -> Dict[str, Any]:
                 "env": s.get("env") or "",
                 "envPath": s.get("envPath") or "",
                 "port": s.get("port") or "",
+                # Older/alternate state shapes store the SSH port separately.
+                "sshPort": s.get("sshPort") or "",
             })
     return {"default_host": env.get("remoteHost") or "", "hosts": hosts}
 

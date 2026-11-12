@@ -55,6 +55,7 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "ls",
     "get_workspace",
     "host_shell",
+    "ssh_exec",
     "search_chats",
     "manage_memory",
     "manage_skills",
@@ -183,7 +184,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "plan_edit", "run_editor_command", "ai_edit_image",
     # Shell is never read-only-safe; block it explicitly so it stays out of plan
     # mode even if the schema list fails to load.
-    "bash", "python",
+    "bash", "python", "ssh_exec",
     # Controls shell processes (kill); plan mode can't run bash anyway.
     "manage_bg_jobs",
 }

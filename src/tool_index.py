@@ -40,6 +40,7 @@ ALWAYS_AVAILABLE = frozenset({
     # a particular call may execute.
     "bash",
     "python",
+    "ssh_exec",
     "read_file",
     "grep",
     "glob",
@@ -106,6 +107,7 @@ COLLECTION_NAME = "odysseus_tool_index"
 BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bash": "Run shell commands on the server. Install packages, git operations, builds, system info, process management. Prefer a dedicated tool whenever one fits the job (file read/write/edit, search, listing); use bash only for what no dedicated tool covers. Do not use for web lookup/search; use web_search or web_fetch when web tools are available.",
     "host_shell": "Run shell commands on the TUI host through an explicitly advertised host bridge, not in the backend Docker container. Use for LAN, local IP, subnet, mDNS, Tailscale fallback, SSH target discovery, arp/nmap/ip route diagnostics when backend runtime is container-limited.",
+    "ssh_exec": "Run a shell command on a remote machine over SSH using the Cookbook's SSH key. Use for remote work on a machine the user configured in Cookbook (a Cookbook server name or its configured user@host). The host must already be configured in Cookbook; arbitrary destinations are refused. ssh runs server-side with the Cookbook identity, so it works even though the bash sandbox cannot see ~/.ssh. Not for local commands (use bash) and not for launching model servers (use serve_model).",
     "python": "Execute Python code for computation, data processing, math, scripting, and parsing. Not for writing code for the user. Prefer a dedicated tool for reading, writing, or searching files; use python only for what no dedicated tool covers. Do not use for web lookup/search; use web_search or web_fetch when web tools are available.",
     "web_search": "Private quick web lookup through Odysseus' configured search backend, normally SearXNG. Use for facts, current events, latest/current information, and ordinary 'search the web/look up/find online' requests. Use this instead of browser navigation to Google/DuckDuckGo/Bing or bash/curl/python/requests scraping. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
     "get_weather": "Get current weather and a three-day forecast for a city or place from Open-Meteo without an API key. Use for weather lookups before web_search.",
@@ -427,8 +429,13 @@ class ToolIndex:
                    "kill the background", "stop the background", "running job"}):
             {"manage_bg_jobs"},
         frozenset({"lan", "local network", "local ip", "subnet", "router",
-                   "tailscale", "ssh", "arp", "nmap", "mdns", "avahi"}):
+                   "tailscale", "arp", "nmap", "mdns", "avahi"}):
             {"host_shell"},
+        # Remote shell work on a Cookbook-configured machine. The bash sandbox
+        # cannot see ~/.ssh, so ssh must go through the server-side tool.
+        frozenset({"ssh", "ssh into", "remote machine", "remote host",
+                   "remote shell", "remote command", "on the remote"}):
+            {"ssh_exec", "list_cookbook_servers"},
         frozenset({"youtube", "youtu.be", "yt", "video comments", "youtube comments", "transcript"}):
             {"youtube_tool", "web_search", "web_fetch", "private_browser"},
         frozenset({"local video", "video file", "watch this video", "movie clip", "video.mp4", "video.webm", "inspect image"}):
