@@ -143,6 +143,13 @@ the narrower `--cap-add SYS_ADMIN --security-opt seccomp=unconfined` over
 `--privileged`; both make the `bubblewrap` probe succeed, while the default
 profile still fails. Both remain a significant security relaxation.
 
+Rootless Docker does not remove this requirement. Tested with Docker 29.9.3,
+the default rootless profile and `seccomp=unconfined` alone still fail
+namespace creation, and `SYS_ADMIN` alone still fails at `pivot_root`. Rootless
+does scope the relaxation to the user namespace, so it is safer than rootful
+with the same flags — but only if you also stop using the rootful daemon, since
+`docker` group membership is root-equivalent.
+
 For that reason this fork keeps the native systemd install as the recommended
 path and uses Docker only for separable services such as SearXNG.
 
