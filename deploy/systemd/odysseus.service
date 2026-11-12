@@ -1,0 +1,28 @@
+# Odysseus user systemd unit.
+#
+# Assumes the repository is cloned to ~/odysseus. If it lives elsewhere,
+# replace the three %h/odysseus paths below (WorkingDirectory, PATH, and
+# ExecStart) — or run ./install-service.sh from the checkout, which rewrites
+# them automatically. Change --port if 7011 is already taken.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/systemd/odysseus.service ~/.config/systemd/user/odysseus.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now odysseus
+
+[Unit]
+Description=Odysseus AI workspace (uvicorn on 127.0.0.1:7011)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/odysseus
+Environment=PATH=%h/odysseus/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/odysseus/venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 7011
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

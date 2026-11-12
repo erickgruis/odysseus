@@ -17,7 +17,7 @@ This spec covers development and validation surfaces in:
 - `.github/` templates, workflows, and description-check scripts;
 - contributor workflow docs in `CONTRIBUTING.md` and `website/pr-blocker-audit.md`;
 - platform launchers `launch-windows.ps1`, `launcher.py`, `Odysseus.spec`, `build-windows-portable.ps1`, `start-macos.sh`, `build-macos-app.sh`, and `update_windows.bat`;
-- setup/service files such as `setup.py`, `install-service.sh`, and `odysseus-ui.service`.
+- setup/service files such as `setup.py`, `install-service.sh`, and `deploy/systemd/odysseus.service`.
 
 ## Test Runtime
 

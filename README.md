@@ -23,28 +23,61 @@
 
 ---
 
-## Quick Start
+## Quick Start (Linux, system install)
 
 > `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/odysseus-dev/odysseus/tree/main) if you want the more curated branch.
 
-```bash
-git clone https://github.com/odysseus-dev/odysseus.git
-cd odysseus
-cp .env.example .env
-docker compose up -d --build
-```
+Requirements: Python 3.11+, `git`, and `tmux` (Cookbook uses tmux for background model downloads and serves). Node.js/npm is optional and only needed for the browser MCP tool.
 
-Open `http://localhost:7011` when the containers are healthy. The first admin password is printed in `docker compose logs odysseus`.
-
-The compose files pull the official multi-arch image `ghcr.io/odysseus-dev/odysseus` (published by CI on every push to `main` and `dev`) and only build locally if the pull fails — so this also works on hosts without a build toolchain, e.g. as a [Portainer](https://www.portainer.io/) stack.
-
-**Production deployments:** pin the immutable tag instead of `:latest`. `:latest` and bare `:X.Y.Z` tags move on every push to `main`, but `:X.Y.Z-<sha>` (e.g. `1.0.2-7c8070f`) always refers to one specific build:
+Arch Linux:
 
 ```bash
-ODYSSEUS_IMAGE=ghcr.io/odysseus-dev/odysseus:1.0.2-7c8070f docker compose up -d
+sudo pacman -S --needed python git tmux
 ```
 
-Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration live in the [setup guide](website/setup.md).
+Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git tmux
+```
+
+Clone into `~/odysseus` so the bundled systemd unit works unchanged:
+
+```bash
+git clone https://github.com/erickgruis/odysseus.git ~/odysseus
+cd ~/odysseus
+python3 -m venv venv
+./venv/bin/pip install --upgrade pip
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python setup.py
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/odysseus.service ~/.config/systemd/user/odysseus.service
+systemctl --user daemon-reload
+systemctl --user enable --now odysseus
+```
+
+Open `http://127.0.0.1:7011`. `setup.py` creates `.env` from `.env.example` and asks for the first admin password; set `ODYSSEUS_ADMIN_PASSWORD` before running it to preseed one non-interactively.
+
+Useful commands:
+
+```bash
+systemctl --user status odysseus
+journalctl --user -u odysseus -f
+systemctl --user restart odysseus
+```
+
+If the service should keep running without an active login session (headless server), enable lingering once:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+The unit binds to `127.0.0.1:7011`. Edit `--port` in `~/.config/systemd/user/odysseus.service` to use another port. Keep `AUTH_ENABLED=true` before binding outside loopback.
+
+If the repo lives somewhere other than `~/odysseus`, run `./install-service.sh` instead of copying the unit by hand — it rewrites the `%h/odysseus` paths to the checkout location.
+
+Docker, Windows, macOS, HTTPS, and advanced configuration live in the [setup guide](website/setup.md).
 
 ## Features
 

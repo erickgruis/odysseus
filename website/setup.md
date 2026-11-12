@@ -15,15 +15,84 @@ inside **Settings**. Only edit `.env` for deployment-level overrides like
 `APP_BIND`, `APP_PORT`, `AUTH_ENABLED`, `DATABASE_URL`, or a pre-seeded admin password.
 
 On first setup, Odysseus creates an admin account (`admin` unless
-`ODYSSEUS_ADMIN_USER` is set) and prints a temporary password in the terminal.
-For Docker installs, the same line is in `docker compose logs odysseus`.
-Use that for the first login, then change it in **Settings**.
+`ODYSSEUS_ADMIN_USER` is set) and asks for a password in an interactive
+terminal (or prints a temporary one when run non-interactively). Use that for
+the first login, then change it in **Settings**.
 
 Contributing? See [CONTRIBUTING.md](https://github.com/odysseus-dev/odysseus/blob/dev/CONTRIBUTING.md) for setup, testing, and pull request guidelines.
 
-### Docker (recommended)
+### Native Linux (systemd) — recommended
+
+Requirements: Python 3.11+, `git`, and `tmux` (Cookbook uses tmux for
+background model downloads and serves). Node.js/npm is optional and only
+needed for the browser MCP tool.
+
+Arch Linux:
+
 ```bash
-git clone https://github.com/odysseus-dev/odysseus.git
+sudo pacman -S --needed python git tmux
+```
+
+Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git tmux
+```
+
+Clone into `~/odysseus` so the bundled unit works unchanged:
+
+```bash
+git clone https://github.com/erickgruis/odysseus.git ~/odysseus
+cd ~/odysseus
+python3 -m venv venv
+./venv/bin/pip install --upgrade pip
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python setup.py
+mkdir -p ~/.config/systemd/user
+cp deploy/systemd/odysseus.service ~/.config/systemd/user/odysseus.service
+systemctl --user daemon-reload
+systemctl --user enable --now odysseus
+```
+
+Open `http://127.0.0.1:7011`. `setup.py` creates `.env` from `.env.example`
+and asks for the first admin password. Set `ODYSSEUS_ADMIN_PASSWORD` before
+running it to preseed one non-interactively.
+
+Useful commands:
+
+```bash
+systemctl --user status odysseus
+journalctl --user -u odysseus -f
+systemctl --user restart odysseus
+```
+
+For a headless server that should keep the service running without an active
+login session, enable lingering once:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+The unit binds to `127.0.0.1:7011`. Edit `--port` in
+`~/.config/systemd/user/odysseus.service` if the port is taken. Keep
+`AUTH_ENABLED=true` before binding outside loopback.
+
+If the repo lives somewhere other than `~/odysseus`, run
+`./install-service.sh` — it rewrites the `%h/odysseus` paths to the checkout
+location.
+
+The app itself is lightweight; local model serving is the heavy part and
+depends on the model, runtime, GPU, and VRAM, so small hosts can connect to API
+or remote model servers instead.
+
+### Docker (upstream alternative)
+
+This fork's recommended install is the native systemd path above. The upstream
+Compose stack remains available for hosts that prefer containers:
+
+```bash
+git clone https://github.com/erickgruis/odysseus.git
 cd odysseus
 cp .env.example .env       # optional, but recommended for explicit defaults
 docker compose up -d --build
@@ -48,29 +117,13 @@ ODYSSEUS_IMAGE=ghcr.io/odysseus-dev/odysseus:1.0.2-7c8070f
 
 Browse current tags at <https://github.com/odysseus-dev/odysseus/pkgs/container/odysseus>. (Until this package is made public and linked to the repo by an org owner, pulls fall back to the local build automatically — that fallback is intentional.)
 
-Open `http://localhost:7000` when the containers are healthy. Docker Compose
-binds the web UI to `127.0.0.1` by default. If the port is taken, set
-`APP_PORT=7001` in `.env` and recreate the container. Set `APP_BIND=0.0.0.0`
-only when you intentionally want LAN/reverse-proxy access.
+Docker Compose binds the web UI to `127.0.0.1` by default. If the port is
+taken, set `APP_PORT=7001` in `.env` and recreate the container. Set
+`APP_BIND=0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
 > **On Apple Silicon (M-series) Macs:** Docker can't reach the Metal GPU, so
 > Cookbook serves local models on CPU only. For GPU-accelerated model serving,
 > run natively instead — see [Apple Silicon](#apple-silicon) below.
-
-### Native Linux / macOS
-```bash
-git clone https://github.com/odysseus-dev/odysseus.git
-cd odysseus
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python setup.py
-python -m uvicorn app:app --host 127.0.0.1 --port 7000
-```
-Requirements: Python 3.11+. Cookbook also needs `tmux` for background model
-downloads and serves. The app itself is lightweight; local model serving is the
-heavy part and depends on the model, runtime, GPU, and VRAM, so small hosts can
-connect to API or remote model servers instead. Use `--host 0.0.0.0` only when you intentionally want LAN/reverse-proxy access.
 
 ### Apple Silicon
 Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an

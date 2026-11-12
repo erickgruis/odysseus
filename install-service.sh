@@ -1,20 +1,42 @@
 #!/bin/bash
+# Install Odysseus as a systemd --user service.
+#
+# Run this from the repository root after creating the venv and running
+# setup.py:
+#
+#   ./install-service.sh
+#
+# It copies deploy/systemd/odysseus.service to ~/.config/systemd/user/,
+# rewrites %h/odysseus when this checkout is not at ~/odysseus, then enables
+# and starts the service. Safe to re-run.
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVICE_FILE="$SCRIPT_DIR/odysseus-ui.service"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UNIT_SRC="$REPO_DIR/deploy/systemd/odysseus.service"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT_DST="$UNIT_DIR/odysseus.service"
+DEFAULT_REPO="$HOME/odysseus"
 
-if [ ! -f "$SERVICE_FILE" ]; then
-  echo "Error: odysseus-ui.service not found in $SCRIPT_DIR"
+if [ ! -f "$UNIT_SRC" ]; then
+  echo "Error: $UNIT_SRC not found." >&2
+  exit 1
+fi
+if [ ! -x "$REPO_DIR/venv/bin/python" ]; then
+  echo "Error: $REPO_DIR/venv/bin/python not found." >&2
+  echo "Create the venv and install requirements first:" >&2
+  echo "  python3 -m venv venv && ./venv/bin/pip install -r requirements.txt" >&2
   exit 1
 fi
 
-echo "Installing Odysseus UI service..."
-echo "Make sure you've edited odysseus-ui.service with your username and paths first!"
-echo ""
+mkdir -p "$UNIT_DIR"
 
-sudo cp "$SERVICE_FILE" /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable odysseus-ui
-sudo systemctl start odysseus-ui
-sudo systemctl status odysseus-ui
+if [ "$REPO_DIR" = "$DEFAULT_REPO" ]; then
+  cp "$UNIT_SRC" "$UNIT_DST"
+else
+  echo "Checkout is at $REPO_DIR (not $DEFAULT_REPO); rewriting unit paths."
+  sed "s|%h/odysseus|$REPO_DIR|g" "$UNIT_SRC" > "$UNIT_DST"
+fi
+
+systemctl --user daemon-reload
+systemctl --user enable --now odysseus
+systemctl --user status odysseus --no-pager || true
