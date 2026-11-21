@@ -318,6 +318,8 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
                     pass
             db.delete(srv)
             db.commit()
+            from src.tool_capabilities import refresh_local_tool_declarations
+            refresh_local_tool_declarations()
             return {"response": f"Deleted MCP server '{name}'", "exit_code": 0}
         finally:
             db.close()

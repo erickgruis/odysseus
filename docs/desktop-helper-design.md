@@ -127,21 +127,49 @@ comes from being **few, named, and narrow**, plus per-verb confirmation.
 The app must not expose a general command runner. Each verb is a fixed
 operation with typed arguments.
 
-### Known gap: effect classification for desktop verbs
+### Effect classification for desktop verbs (implemented)
 
 The engine classifies user-configured MCP tools as **unknown** and fails high.
-The existing escape hatch declares local read and write tools:
+The original escape hatch declared local read and write tools through two env
+vars, which map to `READ_PRIVATE` and `WRITE_PRIVATE`. Desktop verbs are
+neither: `set_wallpaper` is a local UI change (`UI_SIDE_EFFECT`), not
+private-data access.
 
-```text
-ODYSSEUS_LOCAL_MCP_READ_TOOLS=mcp__<server>__<tool>,...
-ODYSSEUS_LOCAL_MCP_WRITE_TOOLS=mcp__<server>__<tool>,...
+The implemented replacement is a per-server JSON map in
+`mcp_servers.tool_effects`:
+
+```json
+{
+  "set_wallpaper": ["ui_side_effect"],
+  "check_updates": ["ui_side_effect"],
+  "install_updates": ["admin_change", "destructive"]
+}
 ```
 
-Those map to `READ_PRIVATE` and `WRITE_PRIVATE`. Desktop verbs are neither:
-`set_wallpaper` is a local UI change (`UI_SIDE_EFFECT`), not private-data access.
-Before this design can ship, the local-MCP declaration needs a third category
-(or a general per-tool effect declaration) so desktop verbs can be classified
-honestly instead of being treated as private-data writes.
+Resolution rules:
+
+- A declared tool is classified with its declared effects and stays
+  `EXTERNAL_UNTRUSTED`, so its output still arms the gate.
+- Unknown, malformed, empty, or contradictory declarations fail closed.
+- A tool's own `destructiveHint` vetoes a declaration that omits `destructive`.
+- The database declaration wins over the env shorthand for the same tool.
+- Builtin servers and built-in tool names cannot be declared.
+- The admin surface is `PATCH /api/mcp/servers/{id}/tool-effects`; the agent
+  cannot edit its own classifications.
+
+### Known gap: natural-language admission
+
+Authority admission requires the trusted request to name the qualified tool
+exactly, or to match the notes-family heuristic. A user saying "change my
+wallpaper" does not name `mcp__<server>__set_wallpaper`, so the authority would
+deny the call even though the classification is correct.
+
+This is the next integration point. Options include trigger phrases in the
+declaration, a desktop-intent family in the router, or an explicit "the user
+asked for a desktop action" signal from the helper app. It must not be solved by
+admitting every declared tool on every request — that would defeat the authority
+model.
+
 
 ## Simple mode versus admin
 
@@ -259,8 +287,11 @@ Open packaging questions:
 
 ## Next steps
 
-1. Decide the effect-classification gap above; it blocks honest classification.
-2. Prototype `set_wallpaper` as a local MCP tool with an undo handle.
-3. Add a simple-mode route/profile to the engine UI.
-4. Wrap the UI in a tray app and wire first-run setup.
-5. Revisit `check_updates` and `open_software_manager` once the loop works.
+1. ~~Decide the effect-classification gap~~ — implemented as the
+   `mcp_servers.tool_effects` map plus the admin route.
+2. Solve natural-language admission so "change my wallpaper" can authorize the
+   declared verb without naming it literally.
+3. Prototype `set_wallpaper` as a local MCP tool with an undo handle.
+4. Add a simple-mode route/profile to the engine UI.
+5. Wrap the UI in a tray app and wire first-run setup.
+6. Revisit `check_updates` and `open_software_manager` once the loop works.

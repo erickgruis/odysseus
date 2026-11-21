@@ -630,6 +630,7 @@ class McpServer(TimestampMixin, Base):
     is_enabled = Column(Boolean, default=True)
     oauth_config = Column(Text, nullable=True)   # JSON: provider, keys_file, token_file, scopes
     disabled_tools = Column(Text, nullable=True)  # JSON array of tool names to hide from LLM
+    tool_effects = Column(Text, nullable=True)  # JSON map: {tool_name: [effect, ...]}
     oauth_tokens = Column(EncryptedText, nullable=True)  # JSON {tokens, client_info} for generic MCP OAuth, encrypted at rest
 
 
@@ -2034,6 +2035,22 @@ def _migrate_add_disabled_tools():
     except Exception as e:
         logging.getLogger(__name__).warning(f"disabled_tools migration: {e}")
 
+def _migrate_add_mcp_tool_effects_column():
+    """Add tool_effects column to mcp_servers table if missing.
+
+    JSON map of declared per-tool effects, e.g. {"set_wallpaper": ["ui_side_effect"]}.
+    Declared effects classify a user-configured local MCP tool that would
+    otherwise be treated as unknown and fail closed."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(mcp_servers)"))]
+            if "tool_effects" not in cols:
+                conn.execute(text("ALTER TABLE mcp_servers ADD COLUMN tool_effects TEXT"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added tool_effects column to mcp_servers")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"tool_effects migration: {e}")
+
 def _migrate_add_mcp_oauth_tokens_column():
     """Add oauth_tokens column to mcp_servers table if missing.
 
@@ -2508,6 +2525,7 @@ def init_db():
     _migrate_add_task_automation_columns()
     _migrate_add_task_authority_column()
     _migrate_add_disabled_tools()
+    _migrate_add_mcp_tool_effects_column()
     _migrate_add_mcp_oauth_tokens_column()
     _migrate_add_task_v2_columns()
     _migrate_add_notifications_enabled()

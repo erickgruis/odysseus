@@ -16,6 +16,10 @@ from core.database import McpServer, SessionLocal
 from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN, require_admin
 from src.constants import DATA_DIR, MCP_OAUTH_DIR
 from src.mcp_manager import McpManager
+from src.tool_capabilities import (
+    ToolEffect,
+    refresh_local_tool_declarations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +391,7 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
             db.delete(srv)
             db.commit()
+            refresh_local_tool_declarations()
             return {"status": "deleted"}
         finally:
             db.close()
@@ -459,6 +464,55 @@ def setup_mcp_routes(mcp_manager: McpManager):
             return {"id": server_id, "disabled_count": len(disabled)}
         finally:
             db.close()
+
+    @router.patch("/servers/{server_id}/tool-effects")
+    async def update_tool_effects(server_id: str, request: Request):
+        """Set declared effects for a server's local tools.
+
+        Expects JSON body: {"effects": {"set_wallpaper": ["ui_side_effect"]}}.
+        Declarations classify tools that would otherwise be unknown and fail
+        closed. This is an admin surface: the agent must not be able to edit
+        its own classifications.
+        """
+        require_admin(request)
+        internal_token = request.headers.get(INTERNAL_TOOL_HEADER)
+        if internal_token and secrets.compare_digest(internal_token, INTERNAL_TOOL_TOKEN):
+            raise HTTPException(403, "Change MCP tool effects in Settings > Integrations, not from chat")
+
+        allowed = {effect.value for effect in ToolEffect}
+        body = await request.json()
+        effects = body.get("effects", {})
+        if not isinstance(effects, dict):
+            raise HTTPException(400, "effects must be an object of tool name -> effect list")
+
+        normalized: dict[str, list[str]] = {}
+        for tool_name, declared in effects.items():
+            name = str(tool_name or "").strip()
+            if not name or "__" in name or name != name.strip():
+                raise HTTPException(400, f"invalid tool name: {tool_name!r}")
+            if not isinstance(declared, list) or not declared:
+                raise HTTPException(400, f"effects for {name!r} must be a non-empty list")
+            values = []
+            for value in declared:
+                effect = str(value or "").strip().lower()
+                if effect not in allowed:
+                    raise HTTPException(400, f"unknown effect: {value!r}")
+                if effect not in values:
+                    values.append(effect)
+            normalized[name] = values
+
+        db = SessionLocal()
+        try:
+            srv = db.query(McpServer).filter(McpServer.id == server_id).first()
+            if not srv:
+                raise HTTPException(404, "Server not found")
+            srv.tool_effects = json.dumps(normalized) if normalized else None
+            db.commit()
+        finally:
+            db.close()
+
+        refresh_local_tool_declarations()
+        return {"id": server_id, "declared_count": len(normalized)}
 
     # ── OAuth flow for Google MCP servers ──────────────────────────
 

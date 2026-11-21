@@ -411,9 +411,8 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
     MCP domains require the user to name the qualified operation explicitly.
     """
     from src.tool_capabilities import (
-        LOCAL_MCP_READ_TOOLS_ENV, LOCAL_MCP_WRITE_TOOLS_ENV,
-        _local_mcp_tools, _is_declared_local_mcp_read_tool,
-        _is_declared_local_mcp_write_tool, capabilities_for_tool, ToolEffect,
+        declared_local_tool_names, declared_effects_for_tool,
+        capabilities_for_tool, ToolEffect,
     )
     from src.tool_utils import get_mcp_manager
 
@@ -443,7 +442,7 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
         r"(?:create|add|make|write|save|update|edit|append|modify)\b",
         request,
     )
-    declared = _local_mcp_tools(LOCAL_MCP_READ_TOOLS_ENV) | _local_mcp_tools(LOCAL_MCP_WRITE_TOOLS_ENV)
+    declared = declared_local_tool_names()
     admitted = set()
     for name in sorted(declared):
         parts = name.split("__", 2)
@@ -462,20 +461,23 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
         row = next((item for item in rows if item.get("name") == bare), None)
         if row is None:
             continue
-        read_ok = _is_declared_local_mcp_read_tool(name)
-        write_ok = _is_declared_local_mcp_write_tool(name)
-        if not (read_ok or write_ok):
+        effects = declared_effects_for_tool(name)
+        if effects is None:
             continue
         caps = capabilities_for_tool(name)
-        if not caps.known or caps.effects != frozenset({
-            ToolEffect.READ_PRIVATE if read_ok else ToolEffect.WRITE_PRIVATE
-        }):
+        if not caps.known or caps.effects != effects:
             continue
+        write_like = bool(effects & {
+            ToolEffect.WRITE_PRIVATE,
+            ToolEffect.WRITE_WORKSPACE,
+            ToolEffect.ADMIN_CHANGE,
+            ToolEffect.DESTRUCTIVE,
+        })
         ann = row.get("annotations") or {}
         destructive = ann.get("destructiveHint") if isinstance(ann, dict) else getattr(ann, "destructiveHint", None)
         if destructive is True:
             continue
-        if write_ok and re.match(r"^(?:delete|remove|erase|destroy|drop|purge)(?:_|$)", bare, re.I):
+        if write_like and re.match(r"^(?:delete|remove|erase|destroy|drop|purge)(?:_|$)", bare, re.I):
             continue
 
         # Exact qualified names in the trusted request permit any configured
@@ -487,7 +489,7 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
         if not explicitly_named:
             if not local_notes or not re.search(r"(?:^|_)notes?(?:_|$)", bare, re.I):
                 continue
-            if write_ok:
+            if write_like:
                 action = bare.split("_", 1)[0].casefold()
                 if action not in write_verbs or not re.search(write_verbs[action], request):
                     continue

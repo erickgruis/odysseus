@@ -361,6 +361,13 @@ _LOCAL_MCP_WRITE_CAPABILITIES = _capabilities(
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,
 )
 
+# Declared per-tool effects for user-configured local MCP servers. Loaded from
+# the mcp_servers.tool_effects column; the env vars above remain shorthands for
+# read/write-only deployments and stay live at call time.
+_LOCAL_TOOL_EFFECTS: dict[str, frozenset[ToolEffect]] = {}
+_LOCAL_TOOL_EFFECTS_LOADED = False
+_ALLOWED_LOCAL_EFFECTS = frozenset(effect.value for effect in ToolEffect)
+
 
 def _local_mcp_tools(variable: str) -> frozenset[str]:
     """Tool names a deployment declares as touching only the local store.
@@ -406,10 +413,141 @@ def _current_mcp_manager():
         return None
 
 
-def _is_declared_local_mcp_tool(
+def _local_mcp_tool_row(tool_name: str) -> dict | None:
+    """Return the MCP manager's row for a fully-qualified tool name."""
+    parts = tool_name.split("__", 2)
+    if len(parts) != 3:
+        return None
+    manager = _current_mcp_manager()
+    if manager is None:
+        return None
+    rows = getattr(manager, "_tools", {}).get(parts[1], [])
+    return next((row for row in rows if row.get("name") == parts[2]), None)
+
+
+def _parse_declared_effects(raw: Any) -> frozenset[ToolEffect] | None:
+    """Parse a declared effect list. None means the declaration is unusable."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return None
+    effects: set[ToolEffect] = set()
+    for item in raw:
+        value = str(item or "").strip().lower()
+        if value not in _ALLOWED_LOCAL_EFFECTS:
+            return None
+        effects.add(ToolEffect(value))
+    if not effects:
+        return None
+    return frozenset(effects)
+
+
+def _load_declared_local_tool_effects_from_db() -> dict[str, frozenset[ToolEffect]]:
+    """Load declared effects from mcp_servers.tool_effects. Empty on any failure."""
+    declarations: dict[str, frozenset[ToolEffect]] = {}
+    try:
+        from core.database import McpServer, SessionLocal
+
+        db = SessionLocal()
+        try:
+            for row in db.query(McpServer).all():
+                raw = getattr(row, "tool_effects", None)
+                if not raw:
+                    continue
+                try:
+                    mapping = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(mapping, dict):
+                    continue
+                for bare, effects_raw in mapping.items():
+                    bare = str(bare or "").strip()
+                    if not bare or "__" in bare:
+                        continue
+                    effects = _parse_declared_effects(effects_raw)
+                    if effects is None:
+                        continue
+                    declarations[f"mcp__{row.id}__{bare}"] = effects
+        finally:
+            db.close()
+    except Exception:
+        return {}
+    return declarations
+
+
+def refresh_local_tool_declarations() -> None:
+    """Reload declared effects from the database. Call after MCP config changes."""
+    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_EFFECTS_LOADED
+    _LOCAL_TOOL_EFFECTS = _load_declared_local_tool_effects_from_db()
+    _LOCAL_TOOL_EFFECTS_LOADED = True
+
+
+def set_local_tool_declarations(
+    declarations: Mapping[str, Iterable[ToolEffect | str]] | None,
+) -> None:
+    """Install declarations without a database (startup and tests)."""
+    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_EFFECTS_LOADED
+    parsed: dict[str, frozenset[ToolEffect]] = {}
+    for name, effects in (declarations or {}).items():
+        parsed_effects = _parse_declared_effects(effects)
+        if parsed_effects is not None:
+            parsed[str(name)] = parsed_effects
+    _LOCAL_TOOL_EFFECTS = parsed
+    _LOCAL_TOOL_EFFECTS_LOADED = True
+
+
+def _ensure_local_tool_declarations() -> None:
+    if not _LOCAL_TOOL_EFFECTS_LOADED:
+        refresh_local_tool_declarations()
+
+
+def _declared_effects_are_honest(
+    tool_name: str, effects: frozenset[ToolEffect]
+) -> bool:
+    """Reject a declaration contradicted by the tool's own destructive hint."""
+    row = _local_mcp_tool_row(tool_name)
+    if row is None:
+        return True
+    annotations = row.get("annotations") or {}
+    destructive = (
+        annotations.get("destructiveHint")
+        if isinstance(annotations, dict)
+        else getattr(annotations, "destructiveHint", None)
+    )
+    return not (destructive is True and ToolEffect.DESTRUCTIVE not in effects)
+
+
+def declared_effects_for_tool(tool_name: Any) -> frozenset[ToolEffect] | None:
+    """Operator-declared effects for a local MCP tool, or None when undeclared."""
+    if not isinstance(tool_name, str) or not tool_name:
+        return None
+    _ensure_local_tool_declarations()
+    declared = _LOCAL_TOOL_EFFECTS.get(tool_name)
+    if declared is not None:
+        if _declared_effects_are_honest(tool_name, declared):
+            return declared
+        return None
+    # Env shorthands stay live and apply only when the database is silent.
+    if _is_declared_local_mcp_read_tool(tool_name):
+        return frozenset({ToolEffect.READ_PRIVATE})
+    if _is_declared_local_mcp_write_tool(tool_name):
+        return frozenset({ToolEffect.WRITE_PRIVATE})
+    return None
+
+
+def declared_local_tool_names() -> frozenset[str]:
+    """Every name declared through the database or the env shorthands."""
+    _ensure_local_tool_declarations()
+    names = set(_LOCAL_TOOL_EFFECTS)
+    names |= _local_mcp_tools(LOCAL_MCP_READ_TOOLS_ENV)
+    names |= _local_mcp_tools(LOCAL_MCP_WRITE_TOOLS_ENV)
+    return frozenset(names)
+
+
+def _is_well_formed_local_mcp_name(
     tool_name: Any, server_id: str | None = None
 ) -> bool:
-    """Return whether tool_name is an exact, well-formed declared local MCP tool."""
+    """Return whether tool_name is an exact, well-formed local MCP tool name."""
     if not isinstance(tool_name, str) or not tool_name:
         return False
     parts = tool_name.split("__", 2)
@@ -429,9 +567,29 @@ def _is_declared_local_mcp_tool(
         return False
     if tool_name in TOOL_CAPABILITIES:
         return False
+    return True
+
+
+def _is_declared_local_mcp_tool(
+    tool_name: Any, server_id: str | None = None
+) -> bool:
+    """Return whether tool_name is declared through the env read/write shorthands."""
+    if not _is_well_formed_local_mcp_name(tool_name, server_id):
+        return False
     declared_read = tool_name in _local_mcp_tools(LOCAL_MCP_READ_TOOLS_ENV)
     declared_write = tool_name in _local_mcp_tools(LOCAL_MCP_WRITE_TOOLS_ENV)
     return (declared_read or declared_write) and (declared_read != declared_write)
+
+
+def is_declared_local_mcp_tool(
+    tool_name: Any, server_id: str | None = None
+) -> bool:
+    """Return whether tool_name is declared through the database or env shorthands."""
+    if not _is_well_formed_local_mcp_name(tool_name, server_id):
+        return False
+    if _is_declared_local_mcp_tool(tool_name, server_id):
+        return True
+    return declared_effects_for_tool(tool_name) is not None
 
 
 def _is_declared_local_mcp_read_tool(
@@ -499,10 +657,11 @@ def capabilities_for_tool(tool_name: Any) -> ToolCapabilities:
             return capabilities
     if tool_name in _BROWSER_MCP_READ_TOOLS:
         return _BROWSER_MCP_READ_CAPABILITIES
-    if _is_declared_local_mcp_read_tool(tool_name):
-        return _LOCAL_MCP_READ_CAPABILITIES
-    if _is_declared_local_mcp_write_tool(tool_name):
-        return _LOCAL_MCP_WRITE_CAPABILITIES
+    declared_effects = declared_effects_for_tool(tool_name)
+    if declared_effects is not None:
+        return ToolCapabilities(
+            declared_effects, result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED
+        )
     return _UNKNOWN_CAPABILITIES
 
 
