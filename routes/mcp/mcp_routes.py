@@ -467,12 +467,15 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
     @router.patch("/servers/{server_id}/tool-effects")
     async def update_tool_effects(server_id: str, request: Request):
-        """Set declared effects for a server's local tools.
+        """Set declared effects and trigger phrases for a server's local tools.
 
-        Expects JSON body: {"effects": {"set_wallpaper": ["ui_side_effect"]}}.
-        Declarations classify tools that would otherwise be unknown and fail
-        closed. This is an admin surface: the agent must not be able to edit
-        its own classifications.
+        Accepts either the legacy shape
+        ``{"effects": {"set_wallpaper": ["ui_side_effect"]}}`` or the richer
+        ``{"tools": {"set_wallpaper": {"effects": ["ui_side_effect"],
+        "triggers": ["change my wallpaper"]}}}``. Trigger phrases let a user
+        invoke a declared tool without knowing its qualified name. Destructive
+        effects cannot carry triggers. This is an admin surface: the agent must
+        not be able to edit its own classifications.
         """
         require_admin(request)
         internal_token = request.headers.get(INTERNAL_TOOL_HEADER)
@@ -481,25 +484,54 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
         allowed = {effect.value for effect in ToolEffect}
         body = await request.json()
-        effects = body.get("effects", {})
-        if not isinstance(effects, dict):
-            raise HTTPException(400, "effects must be an object of tool name -> effect list")
+        raw_tools = body.get("tools")
+        if raw_tools is None:
+            raw_tools = body.get("effects", {})
+        if not isinstance(raw_tools, dict):
+            raise HTTPException(400, "tools must be an object of tool name -> declaration")
 
-        normalized: dict[str, list[str]] = {}
-        for tool_name, declared in effects.items():
+        normalized: dict[str, dict] = {}
+        for tool_name, declared in raw_tools.items():
             name = str(tool_name or "").strip()
             if not name or "__" in name or name != name.strip():
                 raise HTTPException(400, f"invalid tool name: {tool_name!r}")
-            if not isinstance(declared, list) or not declared:
+
+            triggers_raw = None
+            if isinstance(declared, dict):
+                effects_raw = declared.get("effects")
+                triggers_raw = declared.get("triggers")
+            else:
+                effects_raw = declared
+            if not isinstance(effects_raw, list) or not effects_raw:
                 raise HTTPException(400, f"effects for {name!r} must be a non-empty list")
+
             values = []
-            for value in declared:
+            for value in effects_raw:
                 effect = str(value or "").strip().lower()
                 if effect not in allowed:
                     raise HTTPException(400, f"unknown effect: {value!r}")
                 if effect not in values:
                     values.append(effect)
-            normalized[name] = values
+
+            triggers: list[str] = []
+            if triggers_raw is not None:
+                if not isinstance(triggers_raw, list):
+                    raise HTTPException(400, f"triggers for {name!r} must be a list")
+                if "destructive" in values:
+                    raise HTTPException(400, f"destructive tool {name!r} cannot declare triggers")
+                for phrase in triggers_raw:
+                    text = " ".join(str(phrase or "").split())
+                    if not text:
+                        raise HTTPException(400, f"empty trigger for {name!r}")
+                    if not (2 <= len(text) <= 80):
+                        raise HTTPException(400, f"trigger for {name!r} must be 2-80 characters")
+                    if text not in triggers:
+                        triggers.append(text)
+
+            entry: dict[str, object] = {"effects": values}
+            if triggers:
+                entry["triggers"] = triggers
+            normalized[name] = entry
 
         db = SessionLocal()
         try:

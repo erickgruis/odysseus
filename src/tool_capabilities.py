@@ -365,8 +365,11 @@ _LOCAL_MCP_WRITE_CAPABILITIES = _capabilities(
 # the mcp_servers.tool_effects column; the env vars above remain shorthands for
 # read/write-only deployments and stay live at call time.
 _LOCAL_TOOL_EFFECTS: dict[str, frozenset[ToolEffect]] = {}
+_LOCAL_TOOL_TRIGGERS: dict[str, tuple[str, ...]] = {}
 _LOCAL_TOOL_EFFECTS_LOADED = False
 _ALLOWED_LOCAL_EFFECTS = frozenset(effect.value for effect in ToolEffect)
+_MIN_TRIGGER_LENGTH = 2
+_MAX_TRIGGER_LENGTH = 80
 
 
 def _local_mcp_tools(variable: str) -> frozenset[str]:
@@ -442,9 +445,74 @@ def _parse_declared_effects(raw: Any) -> frozenset[ToolEffect] | None:
     return frozenset(effects)
 
 
-def _load_declared_local_tool_effects_from_db() -> dict[str, frozenset[ToolEffect]]:
-    """Load declared effects from mcp_servers.tool_effects. Empty on any failure."""
-    declarations: dict[str, frozenset[ToolEffect]] = {}
+def _parse_declared_triggers(
+    raw: Any, effects: frozenset[ToolEffect]
+) -> tuple[str, ...] | None:
+    """Parse declared trigger phrases. None means the declaration is unusable.
+
+    Triggers are only admitted for non-destructive effects. A destructive
+    verb must be named explicitly, so a broad phrase can never launch it.
+    """
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return None
+    if ToolEffect.DESTRUCTIVE in effects:
+        return None
+    triggers: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            return None
+        phrase = " ".join(item.split())
+        if not phrase:
+            return None
+        if not (_MIN_TRIGGER_LENGTH <= len(phrase) <= _MAX_TRIGGER_LENGTH):
+            return None
+        folded = phrase.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        triggers.append(phrase)
+    return tuple(triggers)
+
+
+def _parse_declared_tool(
+    raw: Any,
+) -> tuple[frozenset[ToolEffect] | None, tuple[str, ...]]:
+    """Parse one declared tool entry.
+
+    Accepts the legacy list-of-effects shape and the richer
+    ``{"effects": [...], "triggers": [...]}`` shape. Returns ``(None, ())``
+    when the declaration is unusable, so the tool stays unknown.
+    """
+    triggers_raw: Any = None
+    if isinstance(raw, dict):
+        effects_raw = raw.get("effects")
+        triggers_raw = raw.get("triggers")
+    else:
+        effects_raw = raw
+    effects = _parse_declared_effects(effects_raw)
+    if effects is None:
+        return None, ()
+    triggers = _parse_declared_triggers(triggers_raw, effects)
+    if triggers is None:
+        return None, ()
+    return effects, triggers
+
+
+def _load_declared_local_tool_declarations_from_db() -> tuple[
+    dict[str, frozenset[ToolEffect]], dict[str, tuple[str, ...]]
+]:
+    """Load declared effects and triggers from mcp_servers.tool_effects.
+
+    Returns ``(effects, triggers)`` keyed by qualified tool name. An empty
+    pair means the database is unavailable or holds no usable declarations.
+    """
+    effects_by_tool: dict[str, frozenset[ToolEffect]] = {}
+    triggers_by_tool: dict[str, tuple[str, ...]] = {}
     try:
         from core.database import McpServer, SessionLocal
 
@@ -460,39 +528,53 @@ def _load_declared_local_tool_effects_from_db() -> dict[str, frozenset[ToolEffec
                     continue
                 if not isinstance(mapping, dict):
                     continue
-                for bare, effects_raw in mapping.items():
+                for bare, entry in mapping.items():
                     bare = str(bare or "").strip()
                     if not bare or "__" in bare:
                         continue
-                    effects = _parse_declared_effects(effects_raw)
+                    effects, triggers = _parse_declared_tool(entry)
                     if effects is None:
                         continue
-                    declarations[f"mcp__{row.id}__{bare}"] = effects
+                    qualified = f"mcp__{row.id}__{bare}"
+                    effects_by_tool[qualified] = effects
+                    if triggers:
+                        triggers_by_tool[qualified] = triggers
         finally:
             db.close()
     except Exception:
-        return {}
-    return declarations
+        return {}, {}
+    return effects_by_tool, triggers_by_tool
 
 
 def refresh_local_tool_declarations() -> None:
-    """Reload declared effects from the database. Call after MCP config changes."""
-    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_EFFECTS_LOADED
-    _LOCAL_TOOL_EFFECTS = _load_declared_local_tool_effects_from_db()
+    """Reload declared effects and triggers. Call after MCP config changes."""
+    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_TRIGGERS, _LOCAL_TOOL_EFFECTS_LOADED
+    effects, triggers = _load_declared_local_tool_declarations_from_db()
+    _LOCAL_TOOL_EFFECTS = effects
+    _LOCAL_TOOL_TRIGGERS = triggers
     _LOCAL_TOOL_EFFECTS_LOADED = True
 
 
 def set_local_tool_declarations(
-    declarations: Mapping[str, Iterable[ToolEffect | str]] | None,
+    declarations: Mapping[str, Any] | None,
 ) -> None:
-    """Install declarations without a database (startup and tests)."""
-    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_EFFECTS_LOADED
-    parsed: dict[str, frozenset[ToolEffect]] = {}
-    for name, effects in (declarations or {}).items():
-        parsed_effects = _parse_declared_effects(effects)
-        if parsed_effects is not None:
-            parsed[str(name)] = parsed_effects
-    _LOCAL_TOOL_EFFECTS = parsed
+    """Install declarations without a database (startup and tests).
+
+    Values may be a legacy list of effects or the richer
+    ``{"effects": [...], "triggers": [...]}`` mapping.
+    """
+    global _LOCAL_TOOL_EFFECTS, _LOCAL_TOOL_TRIGGERS, _LOCAL_TOOL_EFFECTS_LOADED
+    parsed_effects: dict[str, frozenset[ToolEffect]] = {}
+    parsed_triggers: dict[str, tuple[str, ...]] = {}
+    for name, entry in (declarations or {}).items():
+        effects, triggers = _parse_declared_tool(entry)
+        if effects is None:
+            continue
+        parsed_effects[str(name)] = effects
+        if triggers:
+            parsed_triggers[str(name)] = triggers
+    _LOCAL_TOOL_EFFECTS = parsed_effects
+    _LOCAL_TOOL_TRIGGERS = parsed_triggers
     _LOCAL_TOOL_EFFECTS_LOADED = True
 
 
@@ -533,6 +615,22 @@ def declared_effects_for_tool(tool_name: Any) -> frozenset[ToolEffect] | None:
     if _is_declared_local_mcp_write_tool(tool_name):
         return frozenset({ToolEffect.WRITE_PRIVATE})
     return None
+
+
+def declared_triggers_for_tool(tool_name: Any) -> tuple[str, ...]:
+    """Operator-declared trigger phrases for a local MCP tool.
+
+    Returns an empty tuple when the tool is undeclared, when its effects are
+    dishonest, or when it declares no triggers. Destructive effects never
+    carry triggers; ``_parse_declared_triggers`` rejects them.
+    """
+    if not isinstance(tool_name, str) or not tool_name:
+        return ()
+    _ensure_local_tool_declarations()
+    effects = _LOCAL_TOOL_EFFECTS.get(tool_name)
+    if effects is None or not _declared_effects_are_honest(tool_name, effects):
+        return ()
+    return _LOCAL_TOOL_TRIGGERS.get(tool_name, ())
 
 
 def declared_local_tool_names() -> frozenset[str]:

@@ -1,18 +1,23 @@
-"""Declared per-tool effects for local MCP servers.
+"""Declared per-tool effects and trigger phrases for local MCP servers.
 
 The database declaration is the operator-authored replacement for the
 read/write env shorthands. A declared tool is classified by its effects, not
 by a boolean, so a desktop helper can expose verbs such as ``set_wallpaper``
 (``ui_side_effect``) or ``install_updates`` (``admin_change`` +
-``destructive``) without being treated as a generic shell.
+``destructive``) without being treated as a generic shell. A declaration may
+also carry trigger phrases so a user can invoke the tool without knowing the
+qualified name.
 
 Security invariants preserved here:
 1. A declared tool is still ``EXTERNAL_UNTRUSTED``: its output arms the gate.
 2. Unknown, malformed, empty, or contradictory declarations fail closed.
 3. A tool's own ``destructiveHint`` vetoes a declaration that omits
    ``destructive``.
-4. The database declaration wins over the env shorthand for the same tool.
-5. Builtin servers and built-in tool names cannot be declared.
+4. Destructive effects cannot carry trigger phrases.
+5. Trigger phrases only admit a tool; they never widen its effects.
+6. Ambiguous trigger matches fail closed.
+7. The database declaration wins over the env shorthand for the same tool.
+8. Builtin servers and built-in tool names cannot be declared.
 """
 
 from types import SimpleNamespace
@@ -27,6 +32,7 @@ from src.tool_capabilities import (
     capabilities_for_tool,
     declared_effects_for_tool,
     declared_local_tool_names,
+    declared_triggers_for_tool,
     is_declared_local_mcp_tool,
     refresh_local_tool_declarations,
     set_local_tool_declarations,
@@ -230,3 +236,185 @@ def test_database_loader_reads_tool_effects(monkeypatch):
     capabilities = capabilities_for_tool(TOOL)
     assert capabilities.known is True
     assert capabilities.effects == frozenset({ToolEffect.UI_SIDE_EFFECT})
+
+
+# ── Trigger phrases ────────────────────────────────────────────────────────
+
+
+def test_trigger_phrases_parsed():
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my wallpaper", "new wallpaper"],
+            }
+        }
+    )
+
+    assert declared_effects_for_tool(TOOL) == frozenset({ToolEffect.UI_SIDE_EFFECT})
+    assert declared_triggers_for_tool(TOOL) == ("change my wallpaper", "new wallpaper")
+
+
+def test_legacy_effect_list_has_no_triggers():
+    set_local_tool_declarations({TOOL: ["ui_side_effect"]})
+
+    assert declared_effects_for_tool(TOOL) == frozenset({ToolEffect.UI_SIDE_EFFECT})
+    assert declared_triggers_for_tool(TOOL) == ()
+
+
+def test_destructive_tool_cannot_declare_triggers():
+    set_local_tool_declarations(
+        {
+            INSTALL: {
+                "effects": ["admin_change", "destructive"],
+                "triggers": ["install updates"],
+            }
+        }
+    )
+
+    # The declaration is unusable, so the tool stays unknown and untriggered.
+    assert declared_effects_for_tool(INSTALL) is None
+    assert declared_triggers_for_tool(INSTALL) == ()
+
+
+def test_trigger_ignored_when_effects_are_dishonest():
+    _install_manager(
+        [{"name": "set_wallpaper", "annotations": {"destructiveHint": True}}]
+    )
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my wallpaper"],
+            }
+        }
+    )
+
+    assert declared_effects_for_tool(TOOL) is None
+    assert declared_triggers_for_tool(TOOL) == ()
+
+
+def test_trigger_admits_tool_without_qualified_name():
+    from src.agent_runtime.authority import (
+        SemanticIntent,
+        _trusted_local_mcp_request_tools,
+    )
+
+    _install_manager([{"name": "set_wallpaper"}])
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my wallpaper"],
+            }
+        }
+    )
+
+    intent = SemanticIntent(frozenset(), None, None)
+    admitted = _trusted_local_mcp_request_tools(
+        "change my wallpaper to something dark and brooding", intent
+    )
+
+    assert TOOL in admitted
+
+
+def test_trigger_does_not_match_unrelated_request():
+    from src.agent_runtime.authority import (
+        SemanticIntent,
+        _trusted_local_mcp_request_tools,
+    )
+
+    _install_manager([{"name": "set_wallpaper"}])
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my wallpaper"],
+            }
+        }
+    )
+
+    intent = SemanticIntent(frozenset(), None, None)
+    admitted = _trusted_local_mcp_request_tools("what is the weather today", intent)
+
+    assert TOOL not in admitted
+
+
+def test_trigger_respects_word_boundaries():
+    from src.agent_runtime.authority import (
+        SemanticIntent,
+        _trusted_local_mcp_request_tools,
+    )
+
+    _install_manager([{"name": "set_wallpaper"}])
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["wallpaper"],
+            }
+        }
+    )
+
+    intent = SemanticIntent(frozenset(), None, None)
+    assert TOOL not in _trusted_local_mcp_request_tools("I collect wallpapers", intent)
+    assert TOOL in _trusted_local_mcp_request_tools("set the wallpaper", intent)
+
+
+def test_ambiguous_triggers_fail_closed():
+    from src.agent_runtime.authority import (
+        SemanticIntent,
+        _trusted_local_mcp_request_tools,
+    )
+
+    other = f"mcp__{SERVER}__set_theme"
+    _install_manager([{"name": "set_wallpaper"}, {"name": "set_theme"}])
+    set_local_tool_declarations(
+        {
+            TOOL: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my desktop"],
+            },
+            other: {
+                "effects": ["ui_side_effect"],
+                "triggers": ["change my desktop"],
+            },
+        }
+    )
+
+    intent = SemanticIntent(frozenset(), None, None)
+    admitted = _trusted_local_mcp_request_tools("change my desktop", intent)
+
+    assert TOOL not in admitted
+    assert other not in admitted
+
+
+def test_database_loader_reads_trigger_phrases(monkeypatch):
+    from core import database as core_database
+
+    row = SimpleNamespace(
+        id=SERVER,
+        tool_effects=(
+            '{"set_wallpaper": {"effects": ["ui_side_effect"], '
+            '"triggers": ["change my wallpaper"]}}'
+        ),
+    )
+
+    class _Query:
+        def all(self):
+            return [row]
+
+    class _Session:
+        def query(self, _model):
+            return _Query()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(core_database, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(core_database, "McpServer", object)
+
+    refresh_local_tool_declarations()
+
+    assert declared_effects_for_tool(TOOL) == frozenset({ToolEffect.UI_SIDE_EFFECT})
+    assert declared_triggers_for_tool(TOOL) == ("change my wallpaper",)

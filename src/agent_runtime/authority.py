@@ -402,17 +402,37 @@ def interpret_request(request_text, *, history=(), workspace=None, active_docume
 
 
 
+def _request_matches_triggers(request: str, triggers: tuple[str, ...]) -> bool:
+    """True when the trusted request contains a declared trigger phrase.
+
+    Matching is case-insensitive and bounded by word boundaries so a phrase
+    cannot fire inside a longer word. Trigger phrases are operator data; the
+    request text is trusted input. Model output is never an input here.
+    """
+    text = request.casefold()
+    for phrase in triggers:
+        folded = phrase.casefold().strip()
+        if not folded:
+            continue
+        pattern = r"(?<![A-Za-z0-9_])" + re.escape(folded) + r"(?![A-Za-z0-9_])"
+        if re.search(pattern, text):
+            return True
+    return False
+
+
 def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) -> set[str]:
     """Seal local MCP operations from operator declarations and trusted request intent.
 
-    Discovery validates an operator-declared tool but cannot grant it. For the
-    notes family, only an explicit request for local notes admits matching
-    read operations and explicitly requested non-destructive write verbs. Other
-    MCP domains require the user to name the qualified operation explicitly.
+    Discovery validates an operator-declared tool but cannot grant it. A tool is
+    admitted when the trusted request names its qualified name, when a declared
+    trigger phrase matches the request, or when the notes-family heuristic
+    applies. Trigger phrases are operator-authored and only admit; they never
+    widen effects. Destructive effects cannot carry triggers. Ambiguous trigger
+    matches fail closed.
     """
     from src.tool_capabilities import (
         declared_local_tool_names, declared_effects_for_tool,
-        capabilities_for_tool, ToolEffect,
+        declared_triggers_for_tool, capabilities_for_tool, ToolEffect,
     )
     from src.tool_utils import get_mcp_manager
 
@@ -444,6 +464,7 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
     )
     declared = declared_local_tool_names()
     admitted = set()
+    trigger_matches: list[str] = []
     for name in sorted(declared):
         parts = name.split("__", 2)
         if len(parts) != 3 or parts[0] != "mcp":
@@ -486,16 +507,33 @@ def _trusted_local_mcp_request_tools(request_text: str, intent: SemanticIntent) 
             r"(?<![A-Za-z0-9_])" + re.escape(name.casefold()) + r"(?![A-Za-z0-9_])",
             request,
         ))
-        if not explicitly_named:
-            if not local_notes or not re.search(r"(?:^|_)notes?(?:_|$)", bare, re.I):
+        if explicitly_named:
+            admitted.add(name)
+            continue
+
+        # A declared trigger phrase admits the tool without the qualified name.
+        # Destructive effects never carry triggers, so a broad phrase cannot
+        # launch one. Ambiguous matches are resolved after the loop.
+        triggers = declared_triggers_for_tool(name)
+        if triggers and _request_matches_triggers(request, triggers):
+            trigger_matches.append(name)
+            continue
+
+        if not local_notes or not re.search(r"(?:^|_)notes?(?:_|$)", bare, re.I):
+            continue
+        if write_like:
+            action = bare.split("_", 1)[0].casefold()
+            if action not in write_verbs or not re.search(write_verbs[action], request):
                 continue
-            if write_like:
-                action = bare.split("_", 1)[0].casefold()
-                if action not in write_verbs or not re.search(write_verbs[action], request):
-                    continue
-                if negative_write:
-                    continue
+            if negative_write:
+                continue
         admitted.add(name)
+
+    # Fail closed on ambiguity: if more than one declared tool claims the same
+    # request through a trigger phrase, admit none of them. The agent must ask
+    # or name the operation explicitly.
+    if len(trigger_matches) == 1:
+        admitted.add(trigger_matches[0])
     return admitted
 
 def create_request_authority(request_text, *, owner=None, session_id=None, workspace=None,

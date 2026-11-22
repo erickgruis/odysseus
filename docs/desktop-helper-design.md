@@ -157,18 +157,43 @@ Resolution rules:
 - The admin surface is `PATCH /api/mcp/servers/{id}/tool-effects`; the agent
   cannot edit its own classifications.
 
-### Known gap: natural-language admission
+### Natural-language admission via trigger phrases
 
 Authority admission requires the trusted request to name the qualified tool
 exactly, or to match the notes-family heuristic. A user saying "change my
 wallpaper" does not name `mcp__<server>__set_wallpaper`, so the authority would
 deny the call even though the classification is correct.
 
-This is the next integration point. Options include trigger phrases in the
-declaration, a desktop-intent family in the router, or an explicit "the user
-asked for a desktop action" signal from the helper app. It must not be solved by
-admitting every declared tool on every request — that would defeat the authority
-model.
+This is solved by **declared trigger phrases**, stored with the effects in the
+same `mcp_servers.tool_effects` column. A declaration may use the richer shape:
+
+```json
+{
+  "set_wallpaper": {
+    "effects": ["ui_side_effect"],
+    "triggers": ["change my wallpaper", "new wallpaper"]
+  }
+}
+```
+
+The legacy list-of-effects shape still works and declares no triggers. The
+admin surface is still `PATCH /api/mcp/servers/{id}/tool-effects`; it accepts
+either `{"effects": {...}}` or the richer `{"tools": {...}}`.
+
+Admission rules:
+
+- A trigger phrase admits its tool when the **trusted request** contains the
+  phrase, case-insensitively and bounded by word boundaries.
+- Trigger phrases only admit the tool. They never widen its effects.
+- Destructive effects cannot carry triggers. A destructive verb must be named
+  explicitly, so a broad phrase cannot launch it.
+- Ambiguous matches fail closed: if more than one declared tool claims the same
+  request, none is admitted and the agent must ask or name the operation.
+- The notes-family heuristic remains as a fallback for undeclared local tools.
+
+This is not "admit every declared tool on every request." It is a narrow,
+operator-authored phrase list per tool, evaluated against trusted input only.
+
 
 
 ## Simple mode versus admin
@@ -289,8 +314,8 @@ Open packaging questions:
 
 1. ~~Decide the effect-classification gap~~ — implemented as the
    `mcp_servers.tool_effects` map plus the admin route.
-2. Solve natural-language admission so "change my wallpaper" can authorize the
-   declared verb without naming it literally.
+2. ~~Solve natural-language admission~~ — implemented as declared trigger
+   phrases in the same declaration, admitted against trusted request text only.
 3. Prototype `set_wallpaper` as a local MCP tool with an undo handle.
 4. Add a simple-mode route/profile to the engine UI.
 5. Wrap the UI in a tray app and wire first-run setup.
