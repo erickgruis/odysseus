@@ -23,16 +23,18 @@ typed.
 
 - The Odysseus virtualenv (the `mcp` package is already a dependency).
 - A supported wallpaper backend:
+  - Dux Modular Shell (DMS): preferred when running; uses `dms ipc call wallpaper`
   - GNOME: `gsettings`
   - KDE Plasma: `plasma-apply-wallpaperimage`
   - XFCE: `xfconf-query`
-  - Wayland (Sway, Niri, Hyprland): `swaybg` or a running `swww`
+  - Wayland (Sway, Niri, Hyprland) without DMS: `swaybg` or a running `swww`
 - ImageMagick (`magick`/`convert`) only if you ask for a solid color on a
   desktop backend that requires an image file.
 
-On Niri, install `swaybg`. DMS/Quickshell wallpapers are not controlled
-directly; `swaybg` is layered on top and `undo` stops it so the shell's own
-wallpaper returns.
+DMS is preferred when it is running because it owns the background layer.
+Layering `swaybg` on top would cover the shell's wallpaper and leave DMS's
+settings out of sync. The helper uses DMS's own IPC, including per-monitor
+mode. If DMS is not running, it falls back to `swaybg` or `swww`.
 
 ## Run it manually
 

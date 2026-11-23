@@ -274,9 +274,14 @@ The verb is implemented per desktop environment, chosen at runtime.
 | GNOME | `gsettings set org.gnome.desktop.background picture-uri` |
 | KDE Plasma | `plasma-apply-wallpaperimage` or dbus |
 | XFCE | `xfconf-query` |
-| Sway | `swaybg` |
-| Niri | `niri msg action` |
+| Dux Modular Shell (DMS) | `dms ipc call wallpaper set` / `setFor` |
+| Sway / Niri without DMS | `swaybg` or a running `swww` daemon |
 | Unknown | report "not supported here" rather than fall back to a shell |
+
+DMS is preferred when it is running because it owns the background layer.
+Layering `swaybg` on top would cover the shell's wallpaper and leave DMS's
+settings out of sync. DMS also supports per-monitor wallpapers; the helper
+reads the current mode and sets each output when per-monitor mode is active.
 
 The fallback matters: an unknown desktop must fail closed, not shell out.
 
@@ -318,7 +323,7 @@ Open packaging questions:
    phrases in the same declaration, admitted against trusted request text only.
 3. ~~Prototype `set_wallpaper` as a local MCP tool with an undo handle.~~ —
    implemented in `desktop_helper/` as a stdio MCP server with GNOME, KDE,
-   XFCE, swww, and swaybg backends plus a state-backed undo.
+   XFCE, DMS, swww, and swaybg backends plus a state-backed undo.
 4. Add a simple-mode route/profile to the engine UI.
 5. Wrap the UI in a tray app and wire first-run setup.
 6. Revisit `check_updates` and `open_software_manager` once the loop works.

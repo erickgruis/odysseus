@@ -8,12 +8,14 @@ Supported backends, chosen by desktop session and available binaries:
 - GNOME (``gsettings``)
 - KDE Plasma (``plasma-apply-wallpaperimage``)
 - XFCE (``xfconf-query``)
+- Dux Modular Shell (``dms ipc call wallpaper``), including per-monitor mode
 - Wayland compositors with a running ``swww`` daemon
 - Wayland compositors with ``swaybg`` (started as a layer-shell client)
 
-DMS/Quickshell is detected but not controlled directly; ``swaybg`` is used as
-a temporary layer on top, and undo stops it so the shell's own wallpaper
-returns.
+DMS is preferred when it is running, because it owns the background layer.
+Setting ``swaybg`` on top of DMS would paint over the shell's wallpaper and
+leave DMS's own settings out of sync. The DMS backend changes the shell's
+wallpaper directly, so the shell's settings stay consistent.
 
 Unsupported environments return a clear error instead of guessing. Every
 mutation records the previous state so ``undo`` can restore it.
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -145,6 +148,26 @@ def _swww_running() -> bool:
     return result.returncode == 0
 
 
+def _dms_running() -> bool:
+    """True when the Dux Modular Shell IPC answers with its outputs."""
+    if not _which("dms"):
+        return False
+    result = _run(["dms", "ipc", "call", "outputs", "status"])
+    return result.returncode == 0 and "outputs:" in result.stdout
+
+
+def _dms_screens() -> list[str]:
+    result = _run(["dms", "ipc", "call", "outputs", "status"])
+    match = re.search(r"outputs:\s*(\[[^\]]*\])", result.stdout)
+    if not match:
+        return []
+    try:
+        value = json.loads(match.group(1))
+    except ValueError:
+        return []
+    return [str(item) for item in value if isinstance(item, str)]
+
+
 def detect_backend() -> Backend:
     desktop = (
         os.environ.get("XDG_CURRENT_DESKTOP")
@@ -158,6 +181,8 @@ def detect_backend() -> Backend:
         return Backend("kde", "KDE Plasma")
     if "xfce" in desktop and _which("xfconf-query"):
         return Backend("xfce", "XFCE")
+    if _dms_running():
+        return Backend("dms", "Dux Modular Shell")
     if _swww_running():
         return Backend("swww", "swww")
     if _which("swaybg"):
@@ -165,7 +190,7 @@ def detect_backend() -> Backend:
     if desktop:
         return Backend(
             "unsupported",
-            f"{desktop} has no supported wallpaper backend; install swaybg or swww",
+            f"{desktop} has no supported wallpaper backend; start Dux Modular Shell or install swaybg/swww",
         )
     return Backend("unsupported", "no supported wallpaper backend detected")
 
@@ -454,6 +479,101 @@ def _undo_swaybg(state: dict, dry_run: bool) -> dict:
     return {"ok": True, "backend": "swaybg", "changed": True, "message": "Helper wallpaper stopped; previous wallpaper is visible again."}
 
 
+# ── Dux Modular Shell (DMS) ─────────────────────────────────────────────────
+
+
+def _dms_checked(args: list[str]) -> str:
+    """Run a ``dms ipc call`` and raise on its error text.
+
+    DMS prints ``ERROR: ...`` to stdout and still exits 0, so return code alone
+    is not enough to detect a failed call.
+    """
+    result = _run(["dms", "ipc", "call", *args])
+    text = (result.stdout or "").strip()
+    if result.returncode != 0 or text.startswith("ERROR:") or text.startswith("Function not found"):
+        detail = text or (result.stderr or "").strip() or "dms command failed"
+        raise WallpaperError(detail)
+    return text
+
+
+def _dms_wallpaper_state() -> tuple[bool, dict[str, str]]:
+    """Return ``(global_mode, {screen_or_star: path})`` for DMS.
+
+    DMS can be in global mode (one wallpaper for every output) or per-monitor
+    mode. In per-monitor mode ``wallpaper get`` refuses and ``getFor`` is the
+    only way to read a screen's wallpaper.
+    """
+    result = _run(["dms", "ipc", "call", "wallpaper", "get"])
+    text = (result.stdout or "").strip()
+    if result.returncode == 0 and not text.startswith("ERROR:"):
+        return True, ({"*": text} if text else {})
+    detail = (text + " " + (result.stderr or "")).casefold()
+    if "per-monitor" not in detail:
+        raise WallpaperError(f"dms wallpaper get failed: {text or 'unknown error'}")
+    current: dict[str, str] = {}
+    for screen in _dms_screens():
+        path = _dms_checked(["wallpaper", "getFor", screen])
+        if path:
+            current[screen] = path
+    return False, current
+
+
+def _set_dms(image: str | None, color: str | None, mode: str, dry_run: bool) -> dict:
+    target = image or _solid_image(color)
+    global_mode, previous = _dms_wallpaper_state()
+    if global_mode:
+        commands = [["dms", "ipc", "call", "wallpaper", "set", target]]
+    else:
+        screens = _dms_screens()
+        if not screens:
+            raise WallpaperError("dms reports no connected outputs")
+        commands = [
+            ["dms", "ipc", "call", "wallpaper", "setFor", screen, target]
+            for screen in screens
+        ]
+    if dry_run:
+        return _dry(commands, "dms")
+    for command in commands:
+        _dms_checked(command[3:])
+    save_state({"backend": "dms", "global": global_mode, "previous": previous})
+    return {
+        "ok": True,
+        "backend": "dms",
+        "changed": True,
+        "image": target,
+        "mode": mode,
+        "message": "Wallpaper changed through Dux Modular Shell.",
+    }
+
+
+def _undo_dms(state: dict, dry_run: bool) -> dict:
+    previous = state.get("previous") or {}
+    if state.get("global"):
+        image = previous.get("*")
+        if not image:
+            raise WallpaperError("the previous DMS wallpaper was not recorded")
+        commands = [["dms", "ipc", "call", "wallpaper", "set", image]]
+    else:
+        commands = [
+            ["dms", "ipc", "call", "wallpaper", "setFor", screen, path]
+            for screen, path in previous.items()
+            if path
+        ]
+        if not commands:
+            commands = [["dms", "ipc", "call", "wallpaper", "clear"]]
+    if dry_run:
+        return _dry(commands, "dms")
+    for command in commands:
+        _dms_checked(command[3:])
+    save_state({})
+    return {
+        "ok": True,
+        "backend": "dms",
+        "changed": True,
+        "message": "Previous wallpaper restored.",
+    }
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 
@@ -485,6 +605,8 @@ def set_wallpaper(
             return _undo_kde(previous, dry_run)
         if backend == "xfce":
             return _undo_xfce(previous, dry_run)
+        if backend == "dms":
+            return _undo_dms(state, dry_run)
         if backend == "swww":
             return _undo_swww(previous, dry_run)
         if backend == "swaybg":
@@ -500,6 +622,8 @@ def set_wallpaper(
         return _set_kde(image or _solid_image(color), mode, dry_run)
     if backend.kind == "xfce":
         return _set_xfce(image or _solid_image(color), mode, dry_run)
+    if backend.kind == "dms":
+        return _set_dms(image, color, mode, dry_run)
     if backend.kind == "swww":
         if not image:
             raise WallpaperError("swww needs an image; color is not supported")

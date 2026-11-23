@@ -49,13 +49,22 @@ def test_detect_backend_niri_uses_swaybg(monkeypatch):
         lambda name: "/usr/bin/swaybg" if name == "swaybg" else None,
     )
     monkeypatch.setattr(wallpaper, "_swww_running", lambda: False)
+    monkeypatch.setattr(wallpaper, "_dms_running", lambda: False)
     assert wallpaper.detect_backend().kind == "swaybg"
+
+
+def test_detect_backend_dms(monkeypatch):
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "niri")
+    monkeypatch.setattr(wallpaper, "_which", lambda name: "/usr/bin/dms" if name == "dms" else None)
+    monkeypatch.setattr(wallpaper, "_dms_running", lambda: True)
+    assert wallpaper.detect_backend().kind == "dms"
 
 
 def test_detect_backend_unsupported(monkeypatch):
     monkeypatch.setenv("XDG_CURRENT_DESKTOP", "niri")
     monkeypatch.setattr(wallpaper, "_which", lambda name: None)
     monkeypatch.setattr(wallpaper, "_swww_running", lambda: False)
+    monkeypatch.setattr(wallpaper, "_dms_running", lambda: False)
     backend = wallpaper.detect_backend()
     assert backend.kind == "unsupported"
     assert "swaybg" in backend.detail
@@ -129,6 +138,79 @@ def test_swaybg_set_and_undo(tmp_path, monkeypatch):
 def test_undo_without_state_fails():
     with pytest.raises(wallpaper.WallpaperError):
         wallpaper.set_wallpaper(undo=True)
+
+
+def _dms_fake_run(commands, *, global_mode, screens):
+    def run(cmd):
+        commands.append(cmd)
+        if cmd[:4] == ["dms", "ipc", "call", "outputs"]:
+            return SimpleNamespace(
+                returncode=0, stdout=f'outputs: {screens}', stderr=""
+            )
+        if cmd[:4] == ["dms", "ipc", "call", "wallpaper"] and cmd[4] == "get":
+            if global_mode:
+                return SimpleNamespace(returncode=0, stdout="/old/global.png", stderr="")
+            return SimpleNamespace(
+                returncode=1, stdout="", stderr="ERROR: Per-monitor mode enabled"
+            )
+        if cmd[4] == "getFor":
+            return SimpleNamespace(returncode=0, stdout=f"/old/{cmd[5]}.png", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    return run
+
+
+def test_dms_per_monitor_set_and_undo(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        wallpaper, "detect_backend", lambda: wallpaper.Backend("dms", "Dux Modular Shell")
+    )
+    commands = []
+    monkeypatch.setattr(
+        wallpaper,
+        "_run",
+        _dms_fake_run(commands, global_mode=False, screens='["DP-1", "DP-2"]'),
+    )
+    image = _image(tmp_path)
+
+    result = wallpaper.set_wallpaper(image=image, mode="fill")
+    assert result["ok"] is True
+    assert result["backend"] == "dms"
+    set_commands = [cmd for cmd in commands if cmd[4] == "setFor"]
+    assert len(set_commands) == 2
+    assert wallpaper.load_state()["previous"] == {
+        "DP-1": "/old/DP-1.png",
+        "DP-2": "/old/DP-2.png",
+    }
+
+    commands.clear()
+    undone = wallpaper.set_wallpaper(undo=True)
+    assert undone["ok"] is True
+    assert [cmd[4] for cmd in commands] == ["setFor", "setFor"]
+    assert wallpaper.load_state() == {}
+
+
+def test_dms_global_set_and_undo(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        wallpaper, "detect_backend", lambda: wallpaper.Backend("dms", "Dux Modular Shell")
+    )
+    commands = []
+    monkeypatch.setattr(
+        wallpaper,
+        "_run",
+        _dms_fake_run(commands, global_mode=True, screens='["DP-1"]'),
+    )
+    image = _image(tmp_path)
+
+    result = wallpaper.set_wallpaper(image=image, mode="fill")
+    assert result["ok"] is True
+    assert [cmd[4] for cmd in commands if cmd[4] == "set"] == ["set"]
+    assert wallpaper.load_state()["global"] is True
+
+    commands.clear()
+    undone = wallpaper.set_wallpaper(undo=True)
+    assert undone["ok"] is True
+    assert commands[0][4] == "set"
+    assert commands[0][5] == "/old/global.png"
 
 
 def test_gnome_commands_and_undo(tmp_path, monkeypatch):
