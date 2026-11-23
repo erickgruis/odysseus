@@ -316,7 +316,9 @@ Open packaging questions:
    `mcp_servers.tool_effects` map plus the admin route.
 2. ~~Solve natural-language admission~~ — implemented as declared trigger
    phrases in the same declaration, admitted against trusted request text only.
-3. Prototype `set_wallpaper` as a local MCP tool with an undo handle.
+3. ~~Prototype `set_wallpaper` as a local MCP tool with an undo handle.~~ —
+   implemented in `desktop_helper/` as a stdio MCP server with GNOME, KDE,
+   XFCE, swww, and swaybg backends plus a state-backed undo.
 4. Add a simple-mode route/profile to the engine UI.
 5. Wrap the UI in a tray app and wire first-run setup.
 6. Revisit `check_updates` and `open_software_manager` once the loop works.
