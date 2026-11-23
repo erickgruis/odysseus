@@ -48,6 +48,24 @@ cd ~/odysseus
 The MCP server itself is `desktop_helper/helper_server.py`; it speaks stdio and
 is not meant to be run by hand except for debugging.
 
+## Preview UI (no MCP client needed)
+
+`desktop_helper/preview_server.py` serves a small local page so you can try the
+verbs without Odysseus or an MCP client:
+
+```bash
+./venv/bin/python desktop_helper/preview_server.py
+```
+
+Open <http://127.0.0.1:8791/>. The page shows the detected desktop and backend,
+lets you set a wallpaper (image or solid color, with a dry-run preview), undo
+the last change, and check for updates.
+
+This is a **preview of the verbs, not the MCP transport**. It imports the same
+functions the MCP server calls, so it tests behavior but not the protocol. It
+binds to `127.0.0.1` only and has no authentication; do not expose it to a
+network. Change the port with `ODYSSEUS_HELPER_PREVIEW_PORT`.
+
 ## Register with Odysseus
 
 Use the **admin** MCP settings (Settings → Integrations) or
